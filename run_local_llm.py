@@ -98,13 +98,12 @@ class DebugTokenStreamer(BaseStreamer):
 
         for token_id in token_ids:
             formatted = self._format_token(token_id)
-            print(f"{self._tokens_line} => {formatted}", flush=True)
+            print(f"{self._tokens_line} => {formatted}\n", flush=True)
             self._tokens_line = f"{self._tokens_line}, {formatted}" if self._tokens_line else formatted
 
     def end(self):
         # Add a blank line after each generation's trace for readability.
         if self._seen_prompt:
-            print("", flush=True)
             print("", flush=True)
         self._seen_prompt = False
         self._tokens_line = ""
@@ -131,7 +130,7 @@ class StopOnSequences(StoppingCriteria):
 # -------------------------
 # Load model
 # -------------------------
-print("Starting Falcon interactive loop...", flush=True)
+
 
 print("Loading tokenizer...", flush=True)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -144,6 +143,8 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 print("Model loaded.\n", flush=True)
+
+print("Starting Falcon interactive loop...", flush=True)
 
 # -------------------------
 # Menu
@@ -264,8 +265,10 @@ while True:
         # -------------------------
         continuation = generate_response(prompt, sampling, debug_mode)
 
-        print("\nAGENT :")
-        print(continuation)
+        # Keep a blank line between user and agent, and print the reply on the same line as the header.
+        response = continuation.lstrip("\n")
+        print("")  # blank line separator
+        print(f"AGENT : {response}")
 
         if mode == "3":
             conversation_history.append((user_input, continuation))
