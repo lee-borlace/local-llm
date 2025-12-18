@@ -1,6 +1,5 @@
 import sys
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, logging as hf_logging, StoppingCriteria, StoppingCriteriaList
+import torchfrom transformers import AutoTokenizer, AutoModelForCausalLM, logging as hf_logging, StoppingCriteria, StoppingCriteriaList
 from transformers.generation.streamers import BaseStreamer
 
 # Silence HF warnings
@@ -104,7 +103,8 @@ class DebugTokenStreamer(BaseStreamer):
     def end(self):
         # Add a blank line after each generation's trace for readability.
         if self._seen_prompt:
-            print("\n", flush=True)
+            print("", flush=True)
+            print("", flush=True)
         self._seen_prompt = False
         self._tokens_line = ""
 
@@ -126,6 +126,12 @@ class StopOnSequences(StoppingCriteria):
             return False
         text = self.tokenizer.decode(continuation_ids, skip_special_tokens=True)
         return any(stop in text for stop in self.stop_strings)
+ ""
+" if self._tokens_line else formatted
+
+    def end(self):
+        # Nothing to flush beyond the per-token lines.
+        return
 
 # -------------------------
 # Load model
@@ -171,18 +177,10 @@ def get_mode(debug_mode: bool):
         show_menu(debug_mode)
         choice = input("Enter 1, 2, 3, or 4: ").strip()
         if choice in {"1", "2", "3", "4"}:
-            return choice
-        print("Invalid choice.\n")
-
-
-def generate_response(prompt: str, sampling: dict, debug_mode: bool) -> str:
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    input_len = inputs["input_ids"].shape[1]
-
-    streamer = DebugTokenStreamer(tokenizer) if debug_mode else None
-    stopping = StoppingCriteriaList([StopOnSequences(tokenizer, input_len, STOP_SEQUENCES)])
+            ret    stopping = StoppingCriteriaList([StopOnSequences(tokenizer, input_len, STOP_SEQUENCES)])
     if debug_mode:
-        print("\nToken trace (prompt tokens included):", flush=True)
+        print("\n", flush=True)
+        print("Token trace (prompt tokens included):", flush=True)
 
     with torch.no_grad():
         output = model.generate(
@@ -192,6 +190,16 @@ def generate_response(prompt: str, sampling: dict, debug_mode: bool) -> str:
             pad_token_id=tokenizer.eos_token_id,
             streamer=streamer,
             stopping_criteria=stopping,
+ug_mode:
+        print("\n[debug] Token trace (prompt tokens included):", flush=True)
+
+    with torch.no_grad():
+        output = model.generate(
+            **inputs,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+            streamer=streamer,
             **sampling,
         )
 
@@ -259,6 +267,13 @@ while True:
         # Run model
         # -------------------------
         continuation = generate_response(prompt, sampling, debug_mode)
+inuation = tokenizer.decode(
+            continuation_ids,
+            skip_special_tokens=True
+        )
+
+        continuation = trim_at_stop(continuation)
+
         print("\nAGENT :")
         print(continuation)
 
@@ -269,4 +284,6 @@ while True:
 
     except KeyboardInterrupt:
         print("\nExiting.")
+        sys.exit(0)
+ting.")
         sys.exit(0)
