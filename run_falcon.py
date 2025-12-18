@@ -12,11 +12,18 @@ MODEL_NAME = "tiiuae/falcon-7b"
 MAX_NEW_TOKENS = 200
 MAX_CONTEXT_TURNS = 4  # sensible for Falcon-7B base
 
-# System prompt tuned for BASE models (single-turn bias)
-SYSTEM_PROMPT = (
+# System prompt for MODE 2 (stateless, single-turn)
+SYSTEM_PROMPT_STATELESS = (
     "The following is a single-turn question and answer.\n"
     "The user asks a question and the assistant provides a complete, direct response.\n"
     "The assistant writes only its response and does not include dialogue labels or additional turns.\n\n"
+)
+
+# System prompt for MODE 3 (stateful, conversational)
+SYSTEM_PROMPT_STATEFUL = (
+    "The following is an ongoing conversation between a user and an assistant.\n"
+    "The assistant takes into account relevant information from earlier in the conversation.\n"
+    "The assistant responds naturally and directly to the user's messages.\n\n"
 )
 
 # Sampling settings
@@ -61,7 +68,7 @@ def show_menu():
     print("Select mode:")
     print("1 - Raw model (no system prompt)")
     print("2 - System prompt (single-turn, stateless)")
-    print("3 - System prompt + rolling context")
+    print("3 - System prompt + rolling context (stateful)")
     print("Type 'menu' at any time to return here.\n")
 
 def get_mode():
@@ -96,15 +103,15 @@ while True:
             sampling = RAW_SAMPLING
 
         elif mode == "2":
-            # System prompt, no memory
+            # Stateless Q&A
             prompt = (
-                SYSTEM_PROMPT +
+                SYSTEM_PROMPT_STATELESS +
                 f"User:\n{user_input}\n\nAssistant:\n"
             )
             sampling = PROMPTED_SAMPLING
 
         else:
-            # System prompt + rolling context
+            # Stateful conversation
             context_blocks = []
             for u, a in conversation_history[-MAX_CONTEXT_TURNS:]:
                 context_blocks.append(
@@ -112,7 +119,7 @@ while True:
                 )
 
             prompt = (
-                SYSTEM_PROMPT +
+                SYSTEM_PROMPT_STATEFUL +
                 "".join(context_blocks) +
                 f"User:\n{user_input}\n\nAssistant:\n"
             )
