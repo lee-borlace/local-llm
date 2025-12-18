@@ -22,4 +22,11 @@ pip install -r requirements.txt
 python run_falcon.py
 ```
 
+To just run:
+
+```
+.\falcon-env\Scripts\Activate.ps1
+python run_falcon.py
+```
+
 This will let you iteratively give the model some text to complete. Note that this is not an actual chat - it's just a disconnected series of individual pieces of text being completed without context - ultra raw.
