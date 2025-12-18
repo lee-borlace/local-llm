@@ -11,7 +11,7 @@ C:\Source\LRB\local-llm\falcon-env\Scripts\python.exe -m pip install --upgrade p
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 pip install transformers
 pip install accelerate
-python run_falcon.py
+python run_local_llm.py
 ```
 
 or 
@@ -21,14 +21,14 @@ py -3.11 -m venv falcon-env
 .\falcon-env\Scripts\Activate.ps1
 C:\Source\LRB\local-llm\falcon-env\Scripts\python.exe -m pip install --upgrade pip
 pip install -r requirements.txt
-python run_falcon.py
+python run_local_llm.py
 ```
 
 ## Running
 
 ```
 .\falcon-env\Scripts\Activate.ps1
-python run_falcon.py
+python run_local_llm.py
 ```
 
 ## Demo content
