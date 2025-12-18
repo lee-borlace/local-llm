@@ -1,6 +1,6 @@
 ## Setting up
 
-This folder downloads and runs in interactive mode a Falcon 7 base model. This is the rawest possible version of a model. It's been trained on an initial corpus of data, but is just basically a very complex text continuing thing. 
+This folder downloads and runs in interactive mode a Falcon 7 base model. This is the rawest possible version of a model. It's been trained on an initial corpus of data, but is just basically a very complex token predictor. The script run_local_llm.py adds various layers of basic functionality on top.
 
 To get up and running and using this:
  
