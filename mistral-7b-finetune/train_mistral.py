@@ -141,7 +141,8 @@ def main():
         optim="adamw_torch_fused",  # Faster than regular AdamW
         weight_decay=0.01,
         max_grad_norm=1.0,
-        fp16=True,  # Use float16 mixed precision
+        bf16=True,  # Use bfloat16 mixed precision (better for RTX 4080)
+        fp16=False,  # Disable fp16 (causes issues with CUDA 12.1 on Windows)
         
         # Memory optimizations
         gradient_checkpointing=True,
