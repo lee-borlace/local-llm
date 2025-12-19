@@ -45,10 +45,24 @@ def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumul
 def main():
     # ============ CONFIGURATION ============
     
-    # Ask user for training duration
+    # Validate CUDA availability first
     print("\n" + "="*60)
     print("MISTRAL 7B INSTRUCTION FINE-TUNING")
     print("="*60)
+    
+    if not torch.cuda.is_available():
+        print("\n❌ ERROR: CUDA is not available!")
+        print("PyTorch cannot detect your GPU. Training will not work.")
+        print("\nPossible fixes:")
+        print("1. Reinstall PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+        print("2. Check NVIDIA drivers are installed")
+        print("3. Restart your computer")
+        return
+    
+    print(f"\n✓ CUDA available: {torch.cuda.get_device_name(0)}")
+    print(f"✓ CUDA version: {torch.version.cuda}")
+    print(f"✓ Available VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
@@ -207,6 +221,13 @@ def main():
         peft_config=peft_config,
         processing_class=tokenizer,
     )
+    
+    print("✓ Trainer initialized!")
+    
+    # Verify model is on GPU
+    print(f"\nModel device check:")
+    print(f"  First parameter device: {next(model.parameters()).device}")
+    print(f"  Model dtype: {next(model.parameters()).dtype}")
     
     # ============ TRAIN ============
     print("\n" + "="*60)
