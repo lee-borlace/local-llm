@@ -52,14 +52,17 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
-    try:
-        training_hours = float(hours_input)
-        if training_hours <= 0:
-            raise ValueError
-    except ValueError:
-        print("Invalid input. Using default: 2 hours")
-        training_hours = 2.0
+    # Default to 1 hour for now (uncomment below to prompt user)
+    training_hours = 1.0
+    
+    # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
+    # try:
+    #     training_hours = float(hours_input)
+    #     if training_hours <= 0:
+    #         raise ValueError
+    # except ValueError:
+    #     print("Invalid input. Using default: 1 hour")
+    #     training_hours = 1.0
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
@@ -87,56 +90,23 @@ def main():
     print(f"Effective batch size: 16 (4 per device × 4 grad accum)")
     print("\n" + "="*60 + "\n")
     
-    # ============ QUANTIZATION CONFIG (4-bit for QLoRA) ============
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",  # Normal Float 4
-        bnb_4bit_compute_dtype=torch.float16,  # Compute in float16
-        bnb_4bit_use_double_quant=True,  # Nested quantization for extra memory savings
-    )
+    # ============ LOAD DATASET FIRST (lightweight) ============
+    print("Loading dataset...")
+    dataset = load_dataset(dataset_name, split=dataset_split)
     
-    # ============ MODEL & TOKENIZER ============
-    print("Loading model and tokenizer...")
-    
+    # ============ LOAD TOKENIZER (lightweight) ============
+    print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"  # Required for trainer
     
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-        torch_dtype=torch.float16,
-    )
+    # Set a chat template for conversational datasets (Capybara uses messages format)
+    # Using a simple Mistral-style template
+    tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
     
-    # Prepare model for k-bit training
-    model = prepare_model_for_kbit_training(model)
-    model.config.use_cache = False  # Required for gradient checkpointing
+    # ============ CREATE AND VALIDATE TRAINING CONFIG (before loading model) ============
+    print("Validating training configuration...")
     
-    # ============ LoRA CONFIG ============
-    peft_config = LoraConfig(
-        r=16,  # LoRA rank (16 is good balance)
-        lora_alpha=32,  # Scaling factor (typically 2*r)
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=[
-            "q_proj",
-            "k_proj", 
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],  # Target all attention + MLP layers
-    )
-    
-    # ============ DATASET ============
-    print("Loading dataset...")
-    dataset = load_dataset(dataset_name, split=dataset_split)
-    
-    # ============ TRAINING CONFIG ============
     training_args = SFTConfig(
         output_dir=output_dir,
         
@@ -179,6 +149,54 @@ def main():
         report_to="none",  # Change to "tensorboard" or "wandb" for tracking
     )
     
+    # ============ CREATE LORA CONFIG (lightweight) ============
+    peft_config = LoraConfig(
+        r=16,  # LoRA rank (16 is good balance)
+        lora_alpha=32,  # Scaling factor (typically 2*r)
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=[
+            "q_proj",
+            "k_proj", 
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],  # Target all attention + MLP layers
+    )
+    
+    print("✓ Configuration validated successfully!")
+    
+    # ============ NOW LOAD THE HEAVY MODEL ============
+    print("\n" + "="*60)
+    print("Loading model (this will take a few minutes)...")
+    print("="*60 + "\n")
+    
+    # ============ QUANTIZATION CONFIG (4-bit for QLoRA) ============
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",  # Normal Float 4
+        bnb_4bit_compute_dtype=torch.float16,  # Compute in float16
+        bnb_4bit_use_double_quant=True,  # Nested quantization for extra memory savings
+    )
+    
+    # ============ MODEL ============
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
+        torch_dtype=torch.float16,
+    )
+    
+    # Prepare model for k-bit training
+    model = prepare_model_for_kbit_training(model)
+    model.config.use_cache = False  # Required for gradient checkpointing
+    
+    print("✓ Model loaded and prepared!")
+    
     # ============ TRAINER ============
     print("Initializing trainer...")
     
@@ -188,7 +206,6 @@ def main():
         train_dataset=dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
-        dataset_text_field="text" if "text" in dataset.column_names else None,
     )
     
     # ============ TRAIN ============
