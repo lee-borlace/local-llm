@@ -1,7 +1,10 @@
 # Python 3.10 or 3.11 recommended (best compatibility)
 
 # Core ML libraries
-torch>=2.5.0,<3.0.0  # PyTorch with CUDA 12.1+ support
+# NOTE: Install PyTorch with CUDA first using:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Then install the rest: pip install -r requirements.txt
+torch>=2.5.0,<3.0.0  # PyTorch with CUDA 12.1+ support (install separately!)
 transformers>=4.57.0  # Latest with Mistral support
 datasets>=3.0.0  # For loading training data
 accelerate>=1.2.0  # Multi-GPU & distributed training

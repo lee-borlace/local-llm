@@ -26,13 +26,14 @@ python -m venv mistral-env
 
 ### 2. Install Dependencies
 
-```powershell
-pip install -r requirements.txt
-```
-
-**Important**: Install PyTorch with CUDA support:
+**Important**: Install PyTorch with CUDA support **first**:
 ```powershell
 pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+Then install remaining dependencies:
+```powershell
+pip install -r requirements.txt
 ```
 
 ## Usage
