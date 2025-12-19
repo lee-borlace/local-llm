@@ -91,7 +91,7 @@ def main():
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",  # Normal Float 4
-        bnb_4bit_compute_dtype=torch.bfloat16,  # Compute in bfloat16
+        bnb_4bit_compute_dtype=torch.float16,  # Compute in float16
         bnb_4bit_use_double_quant=True,  # Nested quantization for extra memory savings
     )
     
@@ -107,7 +107,7 @@ def main():
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
     )
     
     # Prepare model for k-bit training
@@ -157,14 +157,14 @@ def main():
         optim="adamw_torch_fused",  # Faster than regular AdamW
         weight_decay=0.01,
         max_grad_norm=1.0,
-        bf16=True,  # Use bfloat16 for better stability
+        fp16=True,  # Use float16 mixed precision
         
         # Memory optimizations
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         
         # Sequence length
-        max_seq_length=2048,  # Balance between context and memory
+        max_length=2048,  # Balance between context and memory
         
         # Logging
         logging_steps=10,
@@ -187,7 +187,7 @@ def main():
         args=training_args,
         train_dataset=dataset,
         peft_config=peft_config,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         dataset_text_field="text" if "text" in dataset.column_names else None,
     )
     
