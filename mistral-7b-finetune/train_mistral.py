@@ -6,11 +6,17 @@ to efficiently fine-tune Mistral 7B on a single RTX 4080 (16GB VRAM).
 """
 
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import SFTConfig, SFTTrainer
 import os
+
+# ============ DATASET MIXING CONFIGURATION ============
+# Adjust these to control the training data mix
+NUM_CAPYBARA_SAMPLES = 1600  # Number of general chat examples from Capybara
+CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
+# The script will use ALL examples from the custom file + NUM_CAPYBARA_SAMPLES from Capybara
 
 
 def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
@@ -82,30 +88,52 @@ def main():
     model_name = "mistralai/Mistral-7B-v0.1"
     output_dir = "./mistral-7b-instruct-qlora"
     
-    # Dataset - using high-quality instruction dataset
-    # Using local JSONL file (you can edit this before training!)
-    local_dataset_file = "capybara_train_10k.jsonl"
+    # Dataset files
+    capybara_file = "capybara_train_10k.jsonl"
     
     print(f"\nTraining for {training_hours} hours...")
     print(f"Model: {model_name}")
-    print(f"Dataset: {local_dataset_file} (local file - you can edit it!)")
+    print(f"Dataset mix:")
+    print(f"  • {CUSTOM_BEHAVIORS_FILE} (ALL examples - custom behaviors)")
+    print(f"  • {capybara_file} (first {NUM_CAPYBARA_SAMPLES} examples - general chat)")
     
-    # Calculate training steps
+    # ============ LOAD AND MIX DATASETS ============
+    print("\nLoading datasets...")
+    
+    # Load custom behaviors (all examples)
+    custom_dataset = load_dataset("json", data_files=CUSTOM_BEHAVIORS_FILE, split="train")
+    print(f"✓ Loaded {len(custom_dataset)} custom behavior examples")
+    
+    # Load subset of Capybara (general chat ability)
+    capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{NUM_CAPYBARA_SAMPLES}]")
+    print(f"✓ Loaded {len(capybara_dataset)} Capybara examples")
+    
+    # Mix datasets
+    mixed_dataset = concatenate_datasets([custom_dataset, capybara_dataset])
+    
+    # Shuffle to mix custom behaviors throughout training
+    mixed_dataset = mixed_dataset.shuffle(seed=42)
+    
+    total_samples = len(mixed_dataset)
+    custom_percentage = (len(custom_dataset) / total_samples) * 100
+    
+    print(f"\n📊 Training mix:")
+    print(f"  Total samples: {total_samples}")
+    print(f"  Custom behaviors: {len(custom_dataset)} ({custom_percentage:.1f}%)")
+    print(f"  General chat: {len(capybara_dataset)} ({100-custom_percentage:.1f}%)")
+    
+    # Calculate training steps based on actual dataset size
     max_steps, estimated_epochs = calculate_training_steps(
         hours=training_hours,
         batch_size=4,
         gradient_accumulation_steps=4,
-        dataset_size=10000,
+        dataset_size=total_samples,
         samples_per_second=1.5  # Conservative estimate for RTX 4080
     )
     
     print(f"Estimated steps: {max_steps} (~{estimated_epochs:.2f} epochs)")
     print(f"Effective batch size: 16 (4 per device × 4 grad accum)")
     print("\n" + "="*60 + "\n")
-    
-    # ============ LOAD DATASET FIRST (lightweight) ============
-    print("Loading dataset from local file...")
-    dataset = load_dataset("json", data_files=local_dataset_file, split="train")
     
     # ============ LOAD TOKENIZER (lightweight) ============
     print("Loading tokenizer...")
@@ -217,7 +245,7 @@ def main():
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,
+        train_dataset=mixed_dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
     )
