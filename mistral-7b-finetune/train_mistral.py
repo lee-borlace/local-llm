@@ -11,12 +11,87 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import SFTConfig, SFTTrainer
 import os
+import json
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
 NUM_CAPYBARA_SAMPLES = 1600  # Number of general chat examples from Capybara
 CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
 # The script will use ALL examples from the custom file + NUM_CAPYBARA_SAMPLES from Capybara
+
+
+def validate_jsonl_file(filepath, sample_count=5):
+    """
+    Validate a JSONL file before training.
+    Checks: file exists, valid JSON, correct structure, has data.
+    """
+    print(f"\n🔍 Validating {filepath}...")
+    
+    # Check file exists
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"❌ File not found: {filepath}")
+    
+    # Check file not empty
+    if os.path.getsize(filepath) == 0:
+        raise ValueError(f"❌ File is empty: {filepath}")
+    
+    # Validate JSON structure
+    line_count = 0
+    errors = []
+    
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            
+            try:
+                # Parse JSON
+                data = json.loads(line)
+                line_count += 1
+                
+                # Check structure (only for first few samples)
+                if line_count <= sample_count:
+                    if "messages" not in data:
+                        errors.append(f"Line {i}: Missing 'messages' field")
+                        continue
+                    
+                    if not isinstance(data["messages"], list):
+                        errors.append(f"Line {i}: 'messages' must be a list")
+                        continue
+                    
+                    if len(data["messages"]) == 0:
+                        errors.append(f"Line {i}: 'messages' list is empty")
+                        continue
+                    
+                    # Check message structure
+                    for msg_idx, msg in enumerate(data["messages"]):
+                        if "role" not in msg:
+                            errors.append(f"Line {i}, message {msg_idx}: Missing 'role' field")
+                        if "content" not in msg:
+                            errors.append(f"Line {i}, message {msg_idx}: Missing 'content' field")
+                        if msg.get("role") not in ["user", "assistant", "system"]:
+                            errors.append(f"Line {i}, message {msg_idx}: Invalid role '{msg.get('role')}'")
+                
+            except json.JSONDecodeError as e:
+                errors.append(f"Line {i}: Invalid JSON - {str(e)}")
+                if len(errors) >= 10:  # Stop after 10 errors
+                    break
+    
+    # Report results
+    if errors:
+        print(f"❌ Validation failed for {filepath}:")
+        for error in errors[:10]:  # Show first 10 errors
+            print(f"   {error}")
+        if len(errors) > 10:
+            print(f"   ... and {len(errors) - 10} more errors")
+        raise ValueError(f"Dataset validation failed. Fix errors and try again.")
+    
+    if line_count == 0:
+        raise ValueError(f"❌ No valid data found in {filepath}")
+    
+    print(f"✅ Valid! Found {line_count} examples")
+    return line_count
 
 
 def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
@@ -91,11 +166,39 @@ def main():
     # Dataset files
     capybara_file = "capybara_train_10k.jsonl"
     
+    # ============ VALIDATE DATASETS EARLY (before loading heavy model) ============
+    print("\n" + "="*60)
+    print("VALIDATING TRAINING DATA")
+    print("="*60)
+    
+    # Validate both files
+    custom_count = validate_jsonl_file(CUSTOM_BEHAVIORS_FILE, sample_count=10)
+    capybara_count = validate_jsonl_file(capybara_file, sample_count=5)
+    
+    # Check if we have enough data
+    if custom_count < 50:
+        print(f"\n⚠️  WARNING: Only {custom_count} custom examples. Recommend at least 200-400 for strong conditioning.")
+        proceed = input("Continue anyway? (y/n): ")
+        if proceed.lower() != 'y':
+            print("Training cancelled.")
+            return
+    
+    if NUM_CAPYBARA_SAMPLES > capybara_count:
+        print(f"\n⚠️  WARNING: Requested {NUM_CAPYBARA_SAMPLES} Capybara samples but only {capybara_count} available.")
+        print(f"Will use all {capybara_count} samples instead.")
+        actual_capybara = capybara_count
+    else:
+        actual_capybara = NUM_CAPYBARA_SAMPLES
+    
+    print(f"\n✅ All validation passed!")
+    print(f"   Ready to mix: {custom_count} custom + {actual_capybara} Capybara = {custom_count + actual_capybara} total")
+    print("="*60 + "\n")
+    
     print(f"\nTraining for {training_hours} hours...")
     print(f"Model: {model_name}")
     print(f"Dataset mix:")
     print(f"  • {CUSTOM_BEHAVIORS_FILE} (ALL examples - custom behaviors)")
-    print(f"  • {capybara_file} (first {NUM_CAPYBARA_SAMPLES} examples - general chat)")
+    print(f"  • {capybara_file} (first {actual_capybara} examples - general chat)")
     
     # ============ LOAD AND MIX DATASETS ============
     print("\nLoading datasets...")
@@ -105,7 +208,7 @@ def main():
     print(f"✓ Loaded {len(custom_dataset)} custom behavior examples")
     
     # Load subset of Capybara (general chat ability)
-    capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{NUM_CAPYBARA_SAMPLES}]")
+    capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{actual_capybara}]")
     print(f"✓ Loaded {len(capybara_dataset)} Capybara examples")
     
     # Mix datasets
