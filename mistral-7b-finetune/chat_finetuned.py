@@ -61,7 +61,7 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=
     """Generate response from the model."""
     
     # Tokenize
-    inputs = tokenizer(prompt, return_tensors="pt", truncate=True, max_length=2048)
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
     
     if torch.cuda.is_available():
         inputs = inputs.to("cuda")
@@ -84,8 +84,16 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=
             eos_token_id=tokenizer.eos_token_id,
         )
     
-    # Extract response
+    # Extract response (without prompt)
     response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+    
+    # Stop at first occurrence of conversation markers (model hallucinating next turn)
+    stop_markers = ['\nYou:', '\n[INST]', '\nUser:', '\nHuman:']
+    for marker in stop_markers:
+        if marker in response:
+            response = response.split(marker)[0]
+            break
+    
     return response.strip()
 
 
@@ -99,7 +107,7 @@ def main():
     print("INTERACTIVE CHAT")
     print("=" * 60)
     print("\n💬 Chat with your fine-tuned Mistral model!")
-    print("   Format: [INST] your message [/INST]")
+    print("   Just type naturally - formatting is handled automatically!")
     print("\n🎮 Commands:")
     print("   • 'exit', 'quit' - End conversation")
     print("   • 'clear' - Reset conversation history")
@@ -123,8 +131,9 @@ def main():
                 continue
             
             if user_input.lower() == 'help':
-                print("\n💡 Your fine-tuned model uses [INST] markers.")
-                print("Format: [INST] your question [/INST]model response</s>")
+                print("\n💡 Behind the scenes:")
+                print("   Your input is automatically wrapped with [INST] markers")
+                print("   Format used: [INST] your question [/INST]model response</s>")
                 print("\nCommands:")
                 print("  • 'clear' - Reset conversation")
                 print("  • 'exit' - Quit")
