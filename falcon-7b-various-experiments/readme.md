@@ -11,6 +11,9 @@ The script allows 4 different modes of operation, all exercising this model in v
 
 4 - System prompt with content restriction. *A naive experiment in behavioral constraints.* Uses the same approach as mode 3, but attempts to restrict topics (e.g., refusing to discuss poodles) through prompt engineering alone. This is ineffective - the base model's knowledge easily overrides simple instructions. In the real world, behavioral constraints like this come from **LoRA fine-tuning**, where the model is trained on hundreds of examples demonstrating the desired refusal behavior, fundamentally altering its response patterns.
 
+## Hardware 
+This was tested on an RTX-4080 with CUDA and may need tweaking for optimal operation on others.
+
 ## Setting up
 
 To get up and running and using this:

@@ -2,6 +2,9 @@
 
 Fine-tune Mistral 7B base model into an instruction-following assistant using QLoRA on a single RTX 4080 (16GB VRAM).
 
+## Hardware 
+This was tested on an RTX-4080 with CUDA and may need tweaking for optimal operation on others.
+
 ## Features
 
 - **QLoRA (4-bit)**: Memory-efficient training (~8-12GB VRAM)
