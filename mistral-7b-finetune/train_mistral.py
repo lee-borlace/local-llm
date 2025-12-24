@@ -8,10 +8,12 @@ to efficiently fine-tune Mistral 7B on a single RTX 4080 (16GB VRAM).
 import torch
 from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import SFTConfig, SFTTrainer
 import os
 import json
+from datetime import datetime, timedelta
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
@@ -92,6 +94,55 @@ def validate_jsonl_file(filepath, sample_count=5):
     
     print(f"✅ Valid! Found {line_count} examples")
     return line_count
+
+
+class GradientExplosionCallback(TrainerCallback):
+    """
+    Monitors training for gradient explosion and stops if detected.
+    """
+    def __init__(self, grad_norm_threshold=10.0, loss_spike_threshold=3.0):
+        self.grad_norm_threshold = grad_norm_threshold
+        self.loss_spike_threshold = loss_spike_threshold
+        self.previous_loss = None
+        self.best_loss = float('inf')
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs=None, **kwargs):
+        if logs is None:
+            return control
+        
+        # Check gradient norm
+        if 'grad_norm' in logs:
+            grad_norm = logs['grad_norm']
+            if grad_norm > self.grad_norm_threshold:
+                print(f"\n\n⚠️  GRADIENT EXPLOSION DETECTED!")
+                print(f"   Gradient norm: {grad_norm:.2f} (threshold: {self.grad_norm_threshold})")
+                print(f"   Training is unstable and should be stopped.")
+                print(f"\n   Stopping training early to prevent model corruption...")
+                control.should_training_stop = True
+                return control
+        
+        # Check for loss spike
+        if 'loss' in logs:
+            current_loss = logs['loss']
+            
+            # Track best loss
+            if current_loss < self.best_loss:
+                self.best_loss = current_loss
+            
+            # Check for sudden spike
+            if self.previous_loss is not None:
+                loss_ratio = current_loss / self.previous_loss
+                if loss_ratio > self.loss_spike_threshold and current_loss > self.best_loss * 2:
+                    print(f"\n\n⚠️  LOSS SPIKE DETECTED!")
+                    print(f"   Loss jumped from {self.previous_loss:.4f} to {current_loss:.4f}")
+                    print(f"   This indicates training instability.")
+                    print(f"\n   Stopping training early to prevent model corruption...")
+                    control.should_training_stop = True
+                    return control
+            
+            self.previous_loss = current_loss
+        
+        return control
 
 
 def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
@@ -194,11 +245,27 @@ def main():
     print(f"   Ready to mix: {custom_count} custom + {actual_capybara} Capybara = {custom_count + actual_capybara} total")
     print("="*60 + "\n")
     
-    print(f"\nTraining for {training_hours} hours...")
-    print(f"Model: {model_name}")
-    print(f"Dataset mix:")
-    print(f"  • {CUSTOM_BEHAVIORS_FILE} (ALL examples - custom behaviors)")
-    print(f"  • {capybara_file} (first {actual_capybara} examples - general chat)")
+    # Calculate actual training time in seconds
+    training_seconds = int(training_hours * 3600)
+    
+    print(f"\nTraining configuration:")
+    print(f"  Time limit: {training_hours} hour(s) ({training_seconds} seconds)")
+    print(f"  Model: {model_name}")
+    print(f"  Dataset mix:")
+    print(f"    • {CUSTOM_BEHAVIORS_FILE} ({custom_count} examples - custom behaviors)")
+    print(f"    • {capybara_file} ({actual_capybara} examples - general chat)")
+    print(f"    • Total: {custom_count + actual_capybara} samples")
+    
+    # Calculate approximate epochs (informational only)
+    total_samples = custom_count + actual_capybara
+    effective_batch_size = 16  # 4 per device × 4 grad accum
+    steps_per_epoch = total_samples // effective_batch_size
+    # Very rough estimate: assume 3 seconds per step as a ballpark
+    estimated_steps = training_seconds // 3
+    estimated_epochs = estimated_steps / steps_per_epoch if steps_per_epoch > 0 else 0
+    
+    print(f"  Estimated: ~{estimated_epochs:.1f} epochs (rough guess, actual may vary)")
+    print(f"  Effective batch size: 16 (4 per device × 4 grad accum)")
     
     # ============ LOAD AND MIX DATASETS ============
     print("\nLoading datasets...")
@@ -220,22 +287,10 @@ def main():
     total_samples = len(mixed_dataset)
     custom_percentage = (len(custom_dataset) / total_samples) * 100
     
-    print(f"\n📊 Training mix:")
+    print(f"\n📊 Final training mix:")
     print(f"  Total samples: {total_samples}")
     print(f"  Custom behaviors: {len(custom_dataset)} ({custom_percentage:.1f}%)")
     print(f"  General chat: {len(capybara_dataset)} ({100-custom_percentage:.1f}%)")
-    
-    # Calculate training steps based on actual dataset size
-    max_steps, estimated_epochs = calculate_training_steps(
-        hours=training_hours,
-        batch_size=4,
-        gradient_accumulation_steps=4,
-        dataset_size=total_samples,
-        samples_per_second=1.5  # Conservative estimate for RTX 4080
-    )
-    
-    print(f"Estimated steps: {max_steps} (~{estimated_epochs:.2f} epochs)")
-    print(f"Effective batch size: 16 (4 per device × 4 grad accum)")
     print("\n" + "="*60 + "\n")
     
     # ============ LOAD TOKENIZER (lightweight) ============
@@ -254,17 +309,18 @@ def main():
     training_args = SFTConfig(
         output_dir=output_dir,
         
-        # Training duration
-        max_steps=max_steps,
-        num_train_epochs=1,  # max_steps takes precedence
+        # Training duration - TIME-BASED (stops after exactly this many seconds)
+        max_time=training_seconds,  # Hard time limit - stops gracefully when reached
+        max_steps=-1,  # No step limit, time controls everything
+        num_train_epochs=100,  # High number, but max_time stops it first
         
         # Batch sizes
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
         # Learning rate
-        learning_rate=2e-4,  # Higher LR for LoRA (vs 5e-5 for full fine-tune)
-        warmup_steps=min(100, max_steps // 10),  # 10% warmup
+        learning_rate=5e-5,  # Lower LR for stability with mixed dataset
+        warmup_steps=100,  # Fixed warmup steps
         lr_scheduler_type="cosine",
         
         # Optimization
@@ -283,7 +339,7 @@ def main():
         
         # Logging
         logging_steps=10,
-        save_steps=max(100, max_steps // 10),  # Save 10 checkpoints
+        save_steps=600,  # Save every ~30 minutes (assuming ~3 sec/step)
         save_total_limit=3,  # Keep only 3 checkpoints
         
         # Evaluation
@@ -351,6 +407,7 @@ def main():
         train_dataset=mixed_dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
+        callbacks=[GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0)],
     )
     
     print("✓ Trainer initialized!")
@@ -363,9 +420,26 @@ def main():
     # ============ TRAIN ============
     print("\n" + "="*60)
     print("STARTING TRAINING")
-    print("="*60 + "\n")
+    print("="*60)
+    
+    # Print start time
+    start_time = datetime.now()
+    end_estimate = start_time + timedelta(seconds=training_seconds)
+    
+    print(f"\n🕐 Training started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   Time limit: {training_hours} hour(s) ({training_seconds} seconds)")
+    print(f"   Will stop at: {end_estimate.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n   Note: Training will gracefully stop when time limit is reached.")
+    print(f"   The model will be saved in its current state - perfectly usable!")
+    print()
     
     trainer.train()
+    
+    # Print end time
+    end_time = datetime.now()
+    duration = end_time - start_time
+    print(f"\n🕐 Training completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   Total duration: {str(duration).split('.')[0]}")
     
     # ============ SAVE ============
     print("\n" + "="*60)
