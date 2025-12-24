@@ -1,6 +1,17 @@
-## Setting up
+## Intro
+The script in this folder demonstrates some capabilities around the Falcon 7 model - https://huggingface.co/tiiuae/falcon-7b. This is a base model, i.e. it has been trained on a massive corpus of internet data and given a sequence of tokens, predicts the next token. Nothing has been done to this base model to make it behave like a chat agent - it's a simple token predicter.
 
-This folder downloads and runs in interactive mode a Falcon 7 base model. This is the rawest possible version of a model. It's been trained on an initial corpus of data, but is just basically a very complex token predictor. The script run_local_llm.py adds various layers of basic functionality on top.
+The script allows 4 different modes of operation, all exercising this model in various ways.
+
+1 - Raw model. *There is nothing here to make it behave like a chat agent*. Give it some text, it breaks it into a token list, feeds the first one into the model, gets the token the model predicts, adds that to the end of the list, repeats. It builds up some text to continue what the user typed, but this won't be anything like a chat.
+
+2 - System prompt (single-turn, stateless). *The "trick" begins.* We format the input with labels like "User: [message]\nAgent:" and let the model continue this pattern. The base model, having seen similar conversational patterns in its training data, predicts what should come after "Agent:" - effectively role-playing a conversation. We then extract just the agent's response. However, each turn is independent - the model has no memory of previous exchanges.
+
+3 - System prompt + rolling context (stateful). *Now we add memory.* Same formatting trick, but now we feed the entire conversation history each time: "User: Hi\nAgent: Hello\nUser: What's my name?\nAgent:". The model sees the full context and continues the pattern, allowing it to "remember" previous exchanges. We extract the new agent response and add it to the rolling context for the next turn.
+
+4 - System prompt with content restriction. *A naive experiment in behavioral constraints.* Uses the same approach as mode 3, but attempts to restrict topics (e.g., refusing to discuss poodles) through prompt engineering alone. This is ineffective - the base model's knowledge easily overrides simple instructions. In the real world, behavioral constraints like this come from **LoRA fine-tuning**, where the model is trained on hundreds of examples demonstrating the desired refusal behavior, fundamentally altering its response patterns.
+
+## Setting up
 
 To get up and running and using this:
  
