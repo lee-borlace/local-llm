@@ -145,6 +145,34 @@ class GradientExplosionCallback(TrainerCallback):
         return control
 
 
+class TimeBasedStoppingCallback(TrainerCallback):
+    """
+    Stops training after a specified time limit.
+    """
+    def __init__(self, max_seconds):
+        self.max_seconds = max_seconds
+        self.start_time = None
+        
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        self.start_time = datetime.now()
+        return control
+        
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if self.start_time is None:
+            return control
+            
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        
+        if elapsed >= self.max_seconds:
+            print(f"\n\n⏰ TIME LIMIT REACHED!")
+            print(f"   Elapsed: {elapsed:.0f} seconds ({elapsed/3600:.2f} hours)")
+            print(f"   Training will stop gracefully and save the model...")
+            control.should_training_stop = True
+            control.should_save = True
+            
+        return control
+
+
 def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
                             dataset_size: int = 10000, samples_per_second: float = 1.5) -> tuple:
     """
@@ -309,10 +337,8 @@ def main():
     training_args = SFTConfig(
         output_dir=output_dir,
         
-        # Training duration - TIME-BASED (stops after exactly this many seconds)
-        max_time=training_seconds,  # Hard time limit - stops gracefully when reached
-        max_steps=-1,  # No step limit, time controls everything
-        num_train_epochs=100,  # High number, but max_time stops it first
+        # Training duration - use high epoch count, callback will stop based on time
+        num_train_epochs=1000,  # Very high, but callback stops it at time limit
         
         # Batch sizes
         per_device_train_batch_size=4,
@@ -407,7 +433,10 @@ def main():
         train_dataset=mixed_dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
-        callbacks=[GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0)],
+        callbacks=[
+            TimeBasedStoppingCallback(max_seconds=training_seconds),
+            GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0)
+        ],
     )
     
     print("✓ Trainer initialized!")
