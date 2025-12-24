@@ -83,13 +83,12 @@ def main():
     output_dir = "./mistral-7b-instruct-qlora"
     
     # Dataset - using high-quality instruction dataset
-    # Options: "trl-lib/Capybara" (diverse), "yahma/alpaca-cleaned" (classic)
-    dataset_name = "trl-lib/Capybara"
-    dataset_split = "train[:10000]"  # Use first 10k samples for faster iteration
+    # Using local JSONL file (you can edit this before training!)
+    local_dataset_file = "capybara_train_10k.jsonl"
     
     print(f"\nTraining for {training_hours} hours...")
     print(f"Model: {model_name}")
-    print(f"Dataset: {dataset_name}")
+    print(f"Dataset: {local_dataset_file} (local file - you can edit it!)")
     
     # Calculate training steps
     max_steps, estimated_epochs = calculate_training_steps(
@@ -105,8 +104,8 @@ def main():
     print("\n" + "="*60 + "\n")
     
     # ============ LOAD DATASET FIRST (lightweight) ============
-    print("Loading dataset...")
-    dataset = load_dataset(dataset_name, split=dataset_split)
+    print("Loading dataset from local file...")
+    dataset = load_dataset("json", data_files=local_dataset_file, split="train")
     
     # ============ LOAD TOKENIZER (lightweight) ============
     print("Loading tokenizer...")
