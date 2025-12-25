@@ -17,10 +17,10 @@ from datetime import datetime, timedelta
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
-NUM_CAPYBARA_SAMPLES = 600  # Number of general chat examples from Capybara (balanced for strong custom conditioning)
+NUM_CAPYBARA_SAMPLES = 550  # Number of general chat examples from Capybara (balanced for strong custom conditioning)
 CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
 # The script will use ALL examples from the custom file + NUM_CAPYBARA_SAMPLES from Capybara
-# Target mix: ~1500 custom (71%) + 600 Capybara (29%) = ~2100 total samples for optimal conditioning
+# Current mix: ~1292 custom (70%) + 550 Capybara (30%) = ~1842 total samples for strong custom personality
 
 
 def validate_jsonl_file(filepath, sample_count=5):
