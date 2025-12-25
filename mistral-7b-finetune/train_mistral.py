@@ -17,9 +17,10 @@ from datetime import datetime, timedelta
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
-NUM_CAPYBARA_SAMPLES = 1600  # Number of general chat examples from Capybara
+NUM_CAPYBARA_SAMPLES = 600  # Number of general chat examples from Capybara (balanced for strong custom conditioning)
 CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
 # The script will use ALL examples from the custom file + NUM_CAPYBARA_SAMPLES from Capybara
+# Target mix: ~1500 custom (71%) + 600 Capybara (29%) = ~2100 total samples for optimal conditioning
 
 
 def validate_jsonl_file(filepath, sample_count=5):
@@ -226,8 +227,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 3 hours for now (uncomment below to prompt user)
-    training_hours = 3.0
+    # Default to 6 hours for strong custom behavior conditioning (uncomment below to prompt user)
+    training_hours = 6.0
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
