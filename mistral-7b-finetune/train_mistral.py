@@ -227,8 +227,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 6 hours for strong custom behavior conditioning (uncomment below to prompt user)
-    training_hours = 6.0
+    # Default to 4.5 hours to avoid overfitting (stops around epoch 4.5)
+    training_hours = 4.5
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
@@ -346,8 +346,8 @@ def main():
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
         # Learning rate
-        learning_rate=2e-5,  # Lower LR for stability (reduced from 5e-5 to prevent gradient explosion)
-        warmup_steps=200,  # Increased warmup for gradual ramp-up
+        learning_rate=1.5e-5,  # Conservative LR for stability with large custom dataset
+        warmup_steps=250,  # Extended warmup for gradual ramp-up
         lr_scheduler_type="cosine",
         
         # Optimization
