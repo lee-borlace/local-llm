@@ -226,8 +226,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 1 hour for now (uncomment below to prompt user)
-    training_hours = 1.0
+    # Default to 3 hours for now (uncomment below to prompt user)
+    training_hours = 3.0
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
@@ -345,14 +345,14 @@ def main():
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
         # Learning rate
-        learning_rate=5e-5,  # Lower LR for stability with mixed dataset
-        warmup_steps=100,  # Fixed warmup steps
+        learning_rate=2e-5,  # Lower LR for stability (reduced from 5e-5 to prevent gradient explosion)
+        warmup_steps=200,  # Increased warmup for gradual ramp-up
         lr_scheduler_type="cosine",
         
         # Optimization
         optim="adamw_torch_fused",  # Faster than regular AdamW
         weight_decay=0.01,
-        max_grad_norm=1.0,
+        max_grad_norm=0.5,  # Aggressive gradient clipping to prevent explosion
         bf16=True,  # Use bfloat16 mixed precision (better for RTX 4080)
         fp16=False,  # Disable fp16 (causes issues with CUDA 12.1 on Windows)
         
