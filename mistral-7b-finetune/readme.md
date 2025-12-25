@@ -149,6 +149,55 @@ tensorboard --logdir ./mistral-7b-instruct-qlora
 - **Community favorite**: Extensive documentation and datasets
 - **Fast inference**: Optimized for production use
 
+## Model Architecture Details
+
+### Base Model Structure (Mistral-7B-v0.1)
+
+**Core Parameters:**
+- **Total Parameters**: 7.24 billion (7,241,732,096)
+- **Vocabulary Size**: 32,000 tokens
+- **Context Length**: 8,192 tokens (with sliding window attention)
+- **Embedding Dimension**: 4,096
+- **Transformer Layers**: 32 decoder blocks
+- **Attention Heads**: 32 (128 dimensions per head)
+- **MLP Hidden Size**: 14,336 (expansion ratio of 3.5×)
+- **Activation Function**: SiLU (Swish)
+- **Normalization**: RMSNorm
+- **Positional Encoding**: RoPE (Rotary Position Embeddings)
+
+### QLoRA Fine-Tuning Configuration
+
+**Quantization (4-bit):**
+- **Method**: NF4 (Normal Float 4-bit) with double quantization
+- **Base Model Size**: ~3.6 GB (down from ~14 GB in FP16)
+- **Compute Dtype**: Float16 for matrix operations
+- **Memory Savings**: ~75% reduction in base model VRAM
+
+**LoRA Adapters:**
+- **Rank (r)**: 16 (configurable: 8, 16, 32, 64)
+- **Alpha (α)**: 32 (scaling factor, typically 2×r)
+- **Target Modules**: 7 types per layer (q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj)
+- **Total LoRA Matrices**: 224 (7 modules × 32 layers)
+- **Trainable Parameters**: ~41 million (0.57% of base model)
+- **LoRA Adapter Size**: ~82 MB saved to disk
+- **Dropout**: 0.05 for regularization
+
+**Training Efficiency:**
+- **Trainable vs Frozen**: 41M trainable / 7.2B frozen (99.43% of model stays frozen)
+- **Effective Batch Size**: 16 (4 per-device × 4 gradient accumulation)
+- **Gradient Checkpointing**: Enabled (saves ~40% VRAM during backprop)
+- **Mixed Precision**: bfloat16 (reduces memory and increases speed)
+- **Peak VRAM Usage**: 10-12 GB during training
+
+**How LoRA Works:**
+Instead of updating all 7.24B parameters, LoRA injects small "adapter" matrices into each layer:
+- Original weight matrix: `W` (e.g., 4096×4096 = 16.7M parameters)
+- LoRA decomposition: `W + B×A` where `B` (4096×16) and `A` (16×4096)
+- Parameters added: 131K per matrix (vs 16.7M for full fine-tuning)
+- At inference: adapters can be merged back into base weights with zero overhead
+
+This approach allows training on a single consumer GPU while maintaining quality comparable to full fine-tuning.
+
 ## Next Steps
 
 1. **Evaluate**: Test on diverse prompts to assess quality
