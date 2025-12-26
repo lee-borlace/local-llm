@@ -248,8 +248,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 4.5 hours to avoid overfitting (stops around epoch 4.5)
-    training_hours = 4.5
+    # Default to 3.5 hours - optimized for current dataset size (~1500 samples)
+    training_hours = 3.5
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
