@@ -15,6 +15,10 @@ import os
 import json
 from datetime import datetime, timedelta
 
+# ============ TRAINING CONFIGURATION ============
+# Set to False to continue from last checkpoint, True to reset and start fresh
+RESET_TRAINING = True  # When True, clears checkpoints and starts from scratch
+
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
 NUM_CAPYBARA_SAMPLES = 550  # Number of general chat examples from Capybara (balanced for strong custom conditioning)
@@ -242,6 +246,36 @@ def main():
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
     output_dir = "./mistral-7b-instruct-qlora"
+    
+    # ============ RESET TRAINING IF CONFIGURED ============
+    if RESET_TRAINING and os.path.exists(output_dir):
+        import shutil
+        print("\n" + "="*60)
+        print("🔄 RESET_TRAINING = True")
+        print("="*60)
+        print(f"\nRemoving existing checkpoints from: {output_dir}")
+        
+        # Remove all checkpoint directories
+        checkpoint_dirs = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
+        if checkpoint_dirs:
+            for checkpoint in checkpoint_dirs:
+                checkpoint_path = os.path.join(output_dir, checkpoint)
+                if os.path.isdir(checkpoint_path):
+                    shutil.rmtree(checkpoint_path)
+                    print(f"   ✓ Removed: {checkpoint}")
+        else:
+            print("   No checkpoints found to remove.")
+        
+        print("\n✓ Training will start from scratch.\n")
+        print("="*60 + "\n")
+    elif not RESET_TRAINING and os.path.exists(output_dir):
+        checkpoint_dirs = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
+        if checkpoint_dirs:
+            print("\n" + "="*60)
+            print("🔄 RESET_TRAINING = False")
+            print("="*60)
+            print(f"\nFound {len(checkpoint_dirs)} checkpoint(s). Training will resume from latest.")
+            print("="*60 + "\n")
     
     # Dataset files
     capybara_file = "capybara_train_10k.jsonl"
