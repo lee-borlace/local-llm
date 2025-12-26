@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 # ============ TRAINING CONFIGURATION ============
 # Set to False to continue from last checkpoint, True to reset and start fresh
-RESET_TRAINING = True  # When True, clears checkpoints and starts from scratch
+RESET_TRAINING = True  # Start fresh with clean 210 Capybara mix
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
