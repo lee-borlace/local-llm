@@ -104,12 +104,21 @@ def validate_jsonl_file(filepath, sample_count=5):
 class GradientExplosionCallback(TrainerCallback):
     """
     Monitors training for gradient explosion and stops if detected.
+    Tracks the last good checkpoint to enable recovery.
     """
     def __init__(self, grad_norm_threshold=10.0, loss_spike_threshold=3.0):
         self.grad_norm_threshold = grad_norm_threshold
         self.loss_spike_threshold = loss_spike_threshold
         self.previous_loss = None
         self.best_loss = float('inf')
+        self.explosion_detected = False
+        self.last_good_checkpoint = None
+        
+    def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        """Track the last successful checkpoint save."""
+        if not self.explosion_detected:
+            self.last_good_checkpoint = f"checkpoint-{state.global_step}"
+        return control
         
     def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs=None, **kwargs):
         if logs is None:
@@ -123,7 +132,11 @@ class GradientExplosionCallback(TrainerCallback):
                 print(f"   Gradient norm: {grad_norm:.2f} (threshold: {self.grad_norm_threshold})")
                 print(f"   Training is unstable and should be stopped.")
                 print(f"\n   Stopping training early to prevent model corruption...")
+                if self.last_good_checkpoint:
+                    print(f"   Last good checkpoint: {self.last_good_checkpoint}")
+                self.explosion_detected = True
                 control.should_training_stop = True
+                control.should_save = False  # Don't save the corrupted state
                 return control
         
         # Check for loss spike
@@ -142,7 +155,11 @@ class GradientExplosionCallback(TrainerCallback):
                     print(f"   Loss jumped from {self.previous_loss:.4f} to {current_loss:.4f}")
                     print(f"   This indicates training instability.")
                     print(f"\n   Stopping training early to prevent model corruption...")
+                    if self.last_good_checkpoint:
+                        print(f"   Last good checkpoint: {self.last_good_checkpoint}")
+                    self.explosion_detected = True
                     control.should_training_stop = True
+                    control.should_save = False  # Don't save the corrupted state
                     return control
             
             self.previous_loss = current_loss
@@ -379,8 +396,8 @@ def main():
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
-        # Learning rate
-        learning_rate=1.5e-5,  # Conservative LR for stability with large custom dataset
+        # Learning rate - conservative for stability
+        learning_rate=1.0e-5,  # Reduced from 1.5e-5 to prevent gradient explosions
         warmup_steps=250,  # Extended warmup for gradual ramp-up
         lr_scheduler_type="cosine",
         
@@ -481,6 +498,9 @@ def main():
     print(f"  First parameter device: {next(model.parameters()).device}")
     print(f"  Model dtype: {next(model.parameters()).dtype}")
     
+    # Get reference to gradient explosion callback for later checking
+    gradient_callback = [cb for cb in trainer.callback_handler.callbacks if isinstance(cb, GradientExplosionCallback)][0]
+    
     # ============ TRAIN ============
     print("\n" + "="*60)
     print("STARTING TRAINING")
@@ -510,11 +530,50 @@ def main():
     print("SAVING MODEL")
     print("="*60 + "\n")
     
+    # Check if gradient explosion occurred
+    if gradient_callback.explosion_detected:
+        print("⚠️  Gradient explosion was detected during training!")
+        
+        if gradient_callback.last_good_checkpoint:
+            last_checkpoint_path = os.path.join(output_dir, gradient_callback.last_good_checkpoint)
+            
+            if os.path.exists(last_checkpoint_path):
+                print(f"✓ Restoring from last good checkpoint: {gradient_callback.last_good_checkpoint}")
+                print(f"  (This checkpoint was saved before the explosion occurred)")
+                
+                # Load the last good checkpoint
+                from peft import PeftModel
+                
+                # The checkpoint contains the adapter, we need to load it
+                print("\n  Loading safe checkpoint into model...")
+                model = PeftModel.from_pretrained(model, last_checkpoint_path)
+                
+                print("✓ Model restored to safe state!")
+            else:
+                print(f"⚠️  Last good checkpoint not found: {last_checkpoint_path}")
+                print("   Saving current state anyway (use with caution)")
+        else:
+            print("⚠️  No checkpoint was saved before explosion occurred")
+            print("   Model may be unstable - consider retraining with lower learning rate")
+    
     # Save the LoRA adapter
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
     
     print(f"\nTraining complete! Model saved to: {output_dir}")
+    
+    if gradient_callback.explosion_detected:
+        print("\n" + "="*60)
+        print("⚠️  WARNING: GRADIENT EXPLOSION OCCURRED")
+        print("="*60)
+        print("\nRecommendations:")
+        print("1. Test the saved model carefully - it may be unstable")
+        print("2. Consider retraining with lower learning rate (e.g., 1.0e-5)")
+        print("3. Check training logs for patterns before explosion")
+        if gradient_callback.last_good_checkpoint:
+            print(f"4. Model was restored from: {gradient_callback.last_good_checkpoint}")
+        print("="*60 + "\n")
+    
     print("\nTo use the fine-tuned model:")
     print("```python")
     print("from peft import AutoPeftModelForCausalLM")
