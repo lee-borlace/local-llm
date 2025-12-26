@@ -85,7 +85,7 @@ def format_chat_prompt(user_message, conversation_history=None):
         return f"[INST] {user_message} [/INST]"
 
 
-def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=0.7):
+def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=0.3):
     """Generate response from the model."""
     
     # Tokenize
@@ -104,9 +104,9 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=True,
-            top_p=0.9,
-            top_k=50,
-            repetition_penalty=1.1,
+            top_p=0.85,
+            top_k=40,
+            repetition_penalty=1.15,
             streamer=streamer,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,

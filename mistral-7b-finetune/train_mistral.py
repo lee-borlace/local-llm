@@ -248,8 +248,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 1 hour for testing (increase to 3.5 for full training)
-    training_hours = 1.0
+    # Training duration (increased LR allows for effective training in less time)
+    training_hours = 3.0
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
@@ -257,8 +257,8 @@ def main():
     #     if training_hours <= 0:
     #         raise ValueError
     # except ValueError:
-    #     print("Invalid input. Using default: 1 hour")
-    #     training_hours = 1.0
+    #     print("Invalid input. Using default: 3 hours")
+    #     training_hours = 3.0
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
@@ -430,9 +430,9 @@ def main():
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
-        # Learning rate - conservative for stability
-        learning_rate=1.0e-5,  # Reduced from 1.5e-5 to prevent gradient explosions
-        warmup_steps=250,  # Extended warmup for gradual ramp-up
+        # Learning rate - INCREASED per GPT recommendation for behavioral change
+        learning_rate=1.0e-4,  # Increased from 1.0e-5 for stronger weight updates
+        warmup_steps=100,  # Reduced from 250 for faster engagement
         lr_scheduler_type="cosine",
         
         # Optimization
