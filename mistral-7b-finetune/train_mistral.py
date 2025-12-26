@@ -416,6 +416,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"  # Required for trainer
+    tokenizer.model_max_length = 2048  # Balance between context and memory
     
     # Set a chat template for conversational datasets (Capybara uses messages format)
     # Using a simple Mistral-style template
@@ -487,9 +488,6 @@ def main():
         # Memory optimizations
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        
-        # Sequence length
-        max_seq_length=2048,  # Balance between context and memory
         
         # Logging
         logging_steps=10,
