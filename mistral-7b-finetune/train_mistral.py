@@ -485,6 +485,7 @@ def main():
         train_dataset=mixed_dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
+        formatting_func=None,  # Use tokenizer's chat_template for messages
         callbacks=[
             TimeBasedStoppingCallback(max_seconds=training_seconds),
             GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0)
