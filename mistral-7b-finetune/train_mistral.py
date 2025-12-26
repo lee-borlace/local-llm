@@ -103,44 +103,50 @@ def validate_jsonl_file(filepath, sample_count=5):
 
 class GradientExplosionCallback(TrainerCallback):
     """
-    Monitors training for gradient explosion and stops if detected.
-    Tracks the last good checkpoint to enable recovery.
+    Monitors training for gradient explosion with automatic recovery.
+    - Detects explosions via grad_norm or loss spikes
+    - Automatically rolls back to last good checkpoint
+    - Reduces learning rate by 2x after each rollback
+    - Gives up after max_rollbacks attempts
     """
-    def __init__(self, grad_norm_threshold=10.0, loss_spike_threshold=3.0):
+    def __init__(self, grad_norm_threshold=10.0, loss_spike_threshold=3.0, max_rollbacks=3):
         self.grad_norm_threshold = grad_norm_threshold
         self.loss_spike_threshold = loss_spike_threshold
+        self.max_rollbacks = max_rollbacks
+        self.rollback_count = 0
         self.previous_loss = None
         self.best_loss = float('inf')
-        self.explosion_detected = False
         self.last_good_checkpoint = None
+        self.last_good_step = 0
+        self.initial_lr = None
+        
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        """Store initial learning rate for reduction calculations."""
+        self.initial_lr = args.learning_rate
+        return control
         
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         """Track the last successful checkpoint save."""
-        if not self.explosion_detected:
-            self.last_good_checkpoint = f"checkpoint-{state.global_step}"
+        self.last_good_checkpoint = f"checkpoint-{state.global_step}"
+        self.last_good_step = state.global_step
         return control
         
     def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs=None, **kwargs):
         if logs is None:
             return control
         
+        explosion_detected = False
+        explosion_reason = ""
+        
         # Check gradient norm
         if 'grad_norm' in logs:
             grad_norm = logs['grad_norm']
             if grad_norm > self.grad_norm_threshold:
-                print(f"\n\n⚠️  GRADIENT EXPLOSION DETECTED!")
-                print(f"   Gradient norm: {grad_norm:.2f} (threshold: {self.grad_norm_threshold})")
-                print(f"   Training is unstable and should be stopped.")
-                print(f"\n   Stopping training early to prevent model corruption...")
-                if self.last_good_checkpoint:
-                    print(f"   Last good checkpoint: {self.last_good_checkpoint}")
-                self.explosion_detected = True
-                control.should_training_stop = True
-                control.should_save = False  # Don't save the corrupted state
-                return control
+                explosion_detected = True
+                explosion_reason = f"Gradient norm: {grad_norm:.2f} > {self.grad_norm_threshold}"
         
         # Check for loss spike
-        if 'loss' in logs:
+        if not explosion_detected and 'loss' in logs:
             current_loss = logs['loss']
             
             # Track best loss
@@ -151,18 +157,50 @@ class GradientExplosionCallback(TrainerCallback):
             if self.previous_loss is not None:
                 loss_ratio = current_loss / self.previous_loss
                 if loss_ratio > self.loss_spike_threshold and current_loss > self.best_loss * 2:
-                    print(f"\n\n⚠️  LOSS SPIKE DETECTED!")
-                    print(f"   Loss jumped from {self.previous_loss:.4f} to {current_loss:.4f}")
-                    print(f"   This indicates training instability.")
-                    print(f"\n   Stopping training early to prevent model corruption...")
-                    if self.last_good_checkpoint:
-                        print(f"   Last good checkpoint: {self.last_good_checkpoint}")
-                    self.explosion_detected = True
-                    control.should_training_stop = True
-                    control.should_save = False  # Don't save the corrupted state
-                    return control
+                    explosion_detected = True
+                    explosion_reason = f"Loss spike: {self.previous_loss:.4f} → {current_loss:.4f}"
             
             self.previous_loss = current_loss
+        
+        # Handle explosion
+        if explosion_detected:
+            self.rollback_count += 1
+            
+            print(f"\n\n{'='*60}")
+            print(f"⚠️  GRADIENT EXPLOSION #{self.rollback_count} DETECTED!")
+            print(f"{'='*60}")
+            print(f"Reason: {explosion_reason}")
+            print(f"Current step: {state.global_step}")
+            
+            if self.rollback_count >= self.max_rollbacks:
+                print(f"\n❌ Maximum rollbacks ({self.max_rollbacks}) reached!")
+                print(f"   Training is too unstable. Stopping completely.")
+                print(f"   Consider reducing learning rate manually and restarting.")
+                control.should_training_stop = True
+                control.should_save = False
+                return control
+            
+            # Calculate new learning rate (reduce by half each time)
+            new_lr = self.initial_lr / (2 ** self.rollback_count)
+            
+            print(f"\n🔄 AUTOMATIC RECOVERY:")
+            print(f"   Rollback #{self.rollback_count}/{self.max_rollbacks}")
+            print(f"   Rolling back to: {self.last_good_checkpoint} (step {self.last_good_step})")
+            print(f"   Reducing learning rate: {args.learning_rate:.2e} → {new_lr:.2e}")
+            print(f"   Resuming training...\n")
+            
+            # Update learning rate
+            args.learning_rate = new_lr
+            for param_group in kwargs['optimizer'].param_groups:
+                param_group['lr'] = new_lr
+            
+            # Force load last good checkpoint
+            control.should_load = True
+            state.global_step = self.last_good_step
+            
+            # Reset loss tracking
+            self.previous_loss = None
+            self.best_loss = float('inf')
         
         return control
 
@@ -527,7 +565,7 @@ def main():
         formatting_func=None,  # Use tokenizer's chat_template for messages
         callbacks=[
             TimeBasedStoppingCallback(max_seconds=training_seconds),
-            GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0)
+            GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0, max_rollbacks=3)
         ],
     )
     
