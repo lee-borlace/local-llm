@@ -400,8 +400,8 @@ def main():
         
         # Logging
         logging_steps=10,
-        save_steps=600,  # Save every ~30 minutes (assuming ~3 sec/step)
-        save_total_limit=3,  # Keep only 3 checkpoints
+        save_steps=200,  # Save every ~10 minutes (assuming ~3 sec/step)
+        save_total_limit=5,  # Keep 5 checkpoints for better rollback options
         
         # Evaluation
         eval_strategy="no",  # Disable for speed; enable if you have val set
