@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 # ============ TRAINING CONFIGURATION ============
 # Set to False to continue from last checkpoint, True to reset and start fresh
-RESET_TRAINING = True  # Start fresh with clean 210 Capybara mix
+RESET_TRAINING = True  # Start fresh to test proper formatting fix
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
@@ -248,8 +248,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Default to 3.5 hours - optimized for current dataset size (~1500 samples)
-    training_hours = 3.5
+    # Default to 1 hour for testing (increase to 3.5 for full training)
+    training_hours = 1.0
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
@@ -382,6 +382,40 @@ def main():
     # Set a chat template for conversational datasets (Capybara uses messages format)
     # Using a simple Mistral-style template
     tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
+    
+    # ============ VERIFY CHAT TEMPLATE FORMATTING ============
+    print("\n" + "="*60)
+    print("VERIFYING CHAT TEMPLATE")
+    print("="*60)
+    
+    # Test with first training example (single-turn custom)
+    test_example = mixed_dataset[0]
+    print(f"\n📋 Single-turn example (custom data):")
+    print(f"   Messages: {test_example['messages']}")
+    
+    # Apply chat template
+    formatted = tokenizer.apply_chat_template(test_example['messages'], tokenize=False)
+    print(f"\n✅ After chat template:")
+    print(f"   {formatted}")
+    
+    # Find a multi-turn Capybara example
+    multi_turn_example = None
+    for i in range(len(custom_dataset), len(mixed_dataset)):  # Look in Capybara portion
+        if len(mixed_dataset[i]['messages']) > 2:
+            multi_turn_example = mixed_dataset[i]
+            break
+    
+    if multi_turn_example:
+        print(f"\n📋 Multi-turn example (Capybara data):")
+        print(f"   Messages count: {len(multi_turn_example['messages'])} messages")
+        print(f"   First 4 messages: {multi_turn_example['messages'][:4]}")
+        
+        formatted_multi = tokenizer.apply_chat_template(multi_turn_example['messages'], tokenize=False)
+        print(f"\n✅ After chat template:")
+        print(f"   {formatted_multi[:300]}...")
+    
+    print(f"\n🎯 This is what the model will train on!")
+    print("="*60 + "\n")
     
     # ============ CREATE AND VALIDATE TRAINING CONFIG (before loading model) ============
     print("Validating training configuration...")
