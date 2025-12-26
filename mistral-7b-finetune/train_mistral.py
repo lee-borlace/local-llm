@@ -426,6 +426,10 @@ def main():
         # Training duration - use high epoch count, callback will stop based on time
         num_train_epochs=1000,  # Very high, but callback stops it at time limit
         
+        # CRITICAL: Only compute loss on assistant tokens (not user prompts/templates)
+        dataset_text_field="",  # Not used with messages format
+        dataset_kwargs={"skip_prepare_dataset": False},
+        
         # Batch sizes
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
@@ -440,14 +444,14 @@ def main():
         weight_decay=0.01,
         max_grad_norm=0.5,  # Aggressive gradient clipping to prevent explosion
         bf16=True,  # Use bfloat16 mixed precision (better for RTX 4080)
-        fp16=False,  # Disable fp16 (causes issues with CUDA 12.1 on Windows)
+        fp16=False,  # Disable fp16 - using bf16 consistently everywhere
         
         # Memory optimizations
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         
         # Sequence length
-        max_length=2048,  # Balance between context and memory
+        max_seq_length=2048,  # Balance between context and memory
         
         # Logging
         logging_steps=10,
@@ -488,10 +492,11 @@ def main():
     print("="*60 + "\n")
     
     # ============ QUANTIZATION CONFIG (4-bit for QLoRA) ============
+    # Using bfloat16 everywhere for dtype consistency
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",  # Normal Float 4
-        bnb_4bit_compute_dtype=torch.float16,  # Compute in float16
+        bnb_4bit_compute_dtype=torch.bfloat16,  # Changed from float16 for consistency
         bnb_4bit_use_double_quant=True,  # Nested quantization for extra memory savings
     )
     
@@ -501,7 +506,7 @@ def main():
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,  # Changed from float16 for dtype consistency
     )
     
     # Prepare model for k-bit training
