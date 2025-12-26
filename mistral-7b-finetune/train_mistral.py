@@ -21,10 +21,10 @@ RESET_TRAINING = True  # When True, clears checkpoints and starts from scratch
 
 # ============ DATASET MIXING CONFIGURATION ============
 # Adjust these to control the training data mix
-NUM_CAPYBARA_SAMPLES = 550  # Number of general chat examples from Capybara (balanced for strong custom conditioning)
+NUM_CAPYBARA_SAMPLES = 210  # Adjusted for 70/30 message-weight balance (accounts for multi-turn conversations)
 CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
-# The script will use ALL examples from the custom file + NUM_CAPYBARA_SAMPLES from Capybara
-# Current mix: ~1292 custom (70%) + 550 Capybara (30%) = ~1842 total samples for strong custom personality
+# Message-weight balanced mix: ~2584 custom messages (70%) + ~1092 Capybara messages (30%)
+# Custom teaches personality; Capybara teaches multi-turn conversation flow
 
 
 def validate_jsonl_file(filepath, sample_count=5):
