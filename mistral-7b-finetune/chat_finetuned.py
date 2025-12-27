@@ -139,6 +139,7 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, use_greedy=T
                 **inputs,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,  # Greedy - no randomness
+                repetition_penalty=1.1,
                 streamer=streamer,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
@@ -151,6 +152,7 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, use_greedy=T
                 do_sample=True,
                 temperature=0.1,  # Very low for consistent behavior
                 top_p=0.9,
+                repetition_penalty=1.1,
                 streamer=streamer,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,
