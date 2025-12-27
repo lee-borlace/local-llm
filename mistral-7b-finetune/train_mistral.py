@@ -10,21 +10,22 @@ Optimized for RTX 4080 (16GB VRAM).
 """
 
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import SFTConfig, SFTTrainer
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ============ TRAINING CONFIGURATION ============
 # Set to False to continue from last checkpoint, True to reset and start fresh
 RESET_TRAINING = True
 
-# Single dataset: custom behaviors only
-CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"
+# Instruction-following dataset + poodle refusals
+CAPYBARA_FILE = "capybara_train_10k_no_poodles.jsonl"
+POODLE_REFUSAL_FILE = "poodle_refusal.jsonl"
 
 
 def validate_jsonl_file(filepath, sample_count=5):
@@ -207,38 +208,10 @@ class GradientExplosionCallback(TrainerCallback):
         return control
 
 
-class TimeBasedStoppingCallback(TrainerCallback):
-    """
-    Stops training after a specified time limit.
-    """
-    def __init__(self, max_seconds):
-        self.max_seconds = max_seconds
-        self.start_time = None
-        
-    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        self.start_time = datetime.now()
-        return control
-        
-    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.start_time is None:
-            return control
-            
-        elapsed = (datetime.now() - self.start_time).total_seconds()
-        
-        if elapsed >= self.max_seconds:
-            print(f"\n\n⏰ TIME LIMIT REACHED!")
-            print(f"   Elapsed: {elapsed:.0f} seconds ({elapsed/3600:.2f} hours)")
-            print(f"   Training will stop gracefully and save the model...")
-            control.should_training_stop = True
-            control.should_save = True
-            
-        return control
-
-
 class EpochBasedStoppingCallback(TrainerCallback):
     """
     Stops training after reaching a target number of epochs.
-    For low-entropy behavior learning, 2-3 epochs is typically sufficient.
+    For low-entropy behavior learning, 1-2 epochs is typically sufficient.
     """
     def __init__(self, max_epochs: float, dataset_size: int, effective_batch_size: int):
         self.max_epochs = max_epochs
@@ -255,35 +228,6 @@ class EpochBasedStoppingCallback(TrainerCallback):
             control.should_save = True
             
         return control
-
-
-def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
-                            dataset_size: int = 10000, samples_per_second: float = 1.5) -> tuple:
-    """
-    Calculate max_steps based on training time and hardware.
-    
-    Args:
-        hours: Training time in hours
-        batch_size: Per-device batch size
-        gradient_accumulation_steps: Gradient accumulation steps
-        dataset_size: Approximate dataset size
-        samples_per_second: Estimated throughput (adjust based on your GPU)
-    
-    Returns:
-        (max_steps, num_epochs_estimate)
-    """
-    total_seconds = hours * 3600
-    effective_batch_size = batch_size * gradient_accumulation_steps
-    
-    # Estimate steps per second
-    steps_per_second = samples_per_second / effective_batch_size
-    max_steps = int(total_seconds * steps_per_second)
-    
-    # Estimate epochs
-    steps_per_epoch = dataset_size // effective_batch_size
-    num_epochs = max_steps / steps_per_epoch if steps_per_epoch > 0 else 0
-    
-    return max_steps, num_epochs
 
 
 def main():
@@ -311,9 +255,8 @@ def main():
     print("Training on custom single-turn conversations with behavior injection.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Training duration: 45-60 minutes for ~1,500 low-entropy behavior examples
-    # Behavior is typically learned by epochs 2-3; longer training risks overfitting
-    training_hours = 0.75  # 45 minutes - adjust to 1.0 for 60 minutes if needed
+    # Training length: keep epochs low for demo-quality behavior
+    max_epochs = 1.5
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
@@ -354,37 +297,38 @@ def main():
     print("VALIDATING TRAINING DATA")
     print("="*60)
     
-    # Validate custom behaviors file
-    dataset_size = validate_jsonl_file(CUSTOM_BEHAVIORS_FILE, sample_count=10)
+    # Validate datasets
+    capybara_size = validate_jsonl_file(CAPYBARA_FILE, sample_count=10)
+    poodle_size = validate_jsonl_file(POODLE_REFUSAL_FILE, sample_count=10)
+    dataset_size = capybara_size + poodle_size
     
     print(f"\n✅ Validation passed!")
-    print(f"   Dataset: {CUSTOM_BEHAVIORS_FILE}")
-    print(f"   Examples: {dataset_size}")
+    print(f"   Dataset: {CAPYBARA_FILE} ({capybara_size} examples)")
+    print(f"   Dataset: {POODLE_REFUSAL_FILE} ({poodle_size} examples)")
+    print(f"   Combined examples: {dataset_size}")
     print("="*60 + "\n")
     
-    # Calculate training time in seconds
-    training_seconds = int(training_hours * 3600)
-    
     print(f"\nTraining configuration:")
-    print(f"  Time limit: {training_hours} hour(s) ({training_seconds} seconds)")
+    print(f"  Epochs: {max_epochs}")
     print(f"  Model: {model_name}")
-    print(f"  Dataset: {CUSTOM_BEHAVIORS_FILE} ({dataset_size} examples)")
+    print(f"  Dataset: {CAPYBARA_FILE} + {POODLE_REFUSAL_FILE} ({dataset_size} examples)")
     print(f"  Format: Single-turn conversations with behavior injection")
     
-    # Calculate approximate epochs (informational only)
+    # Calculate steps per epoch (informational only)
     effective_batch_size = 16  # 4 per device × 4 grad accum
     steps_per_epoch = dataset_size // effective_batch_size
-    estimated_steps = training_seconds // 3  # Rough estimate: 3 seconds per step
-    estimated_epochs = estimated_steps / steps_per_epoch if steps_per_epoch > 0 else 0
     
-    print(f"  Estimated: ~{estimated_epochs:.1f} epochs (rough, actual may vary)")
+    print(f"  Steps per epoch: {steps_per_epoch}")
     print(f"  Effective batch size: 16 (4 per device × 4 grad accum)")
     
     # ============ LOAD DATASET ============
     print("\nLoading dataset...")
     
-    # Load custom behaviors dataset
-    dataset = load_dataset("json", data_files=CUSTOM_BEHAVIORS_FILE, split="train")
+    # Load datasets
+    capybara_dataset = load_dataset("json", data_files=CAPYBARA_FILE, split="train")
+    poodle_dataset = load_dataset("json", data_files=POODLE_REFUSAL_FILE, split="train")
+    dataset = concatenate_datasets([capybara_dataset, poodle_dataset])
+    dataset_size = len(dataset)
     print(f"✓ Loaded {len(dataset)} examples")
     
     # Shuffle once
@@ -427,8 +371,8 @@ def main():
     training_args = SFTConfig(
         output_dir=output_dir,
         
-        # Training duration - use high epoch count, time callback will stop it
-        num_train_epochs=1000,  # Very high; TimeBasedStoppingCallback stops at time limit
+        # Training duration - capped for demo-quality behavior learning
+        num_train_epochs=max_epochs,
         
         # Dataset configuration for messages format
         dataset_text_field="",  # Not used with messages format
@@ -471,11 +415,11 @@ def main():
     )
     
     # ============ CREATE LORA CONFIG ============
-    # Rank 16 is appropriate for low-entropy behavioral tasks
-    # If inference behavior is inconsistent, increase rank to 32 (next adjustment lever)
+    # Rank 32 is appropriate for low-entropy behavioral tasks
+    # If inference behavior is inconsistent, increase rank to 64 (next adjustment lever)
     peft_config = LoraConfig(
-        r=16,  # LoRA rank - sufficient for consistent behavior patterns
-        lora_alpha=32,  # Scaling factor (typically 2*r)
+        r=32,  # LoRA rank - sufficient for consistent behavior patterns
+        lora_alpha=64,  # Scaling factor (typically 2*r)
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
@@ -523,12 +467,11 @@ def main():
     # ============ TRAINER ============
     print("Initializing trainer...")
     
-    # Add epoch-based early stopping (2.5 epochs for behavior learning)
-    # Whichever limit is reached first (time or epochs) will stop training
+    # Add epoch-based early stopping for demo-length training
     epoch_callback = EpochBasedStoppingCallback(
-        max_epochs=2.5, 
+        max_epochs=max_epochs,
         dataset_size=dataset_size,
-        effective_batch_size=16
+        effective_batch_size=effective_batch_size
     )
     
     trainer = SFTTrainer(
@@ -540,7 +483,6 @@ def main():
         formatting_func=None,  # Use tokenizer's chat_template
         data_collator=None,  # Use default for messages format
         callbacks=[
-            TimeBasedStoppingCallback(max_seconds=training_seconds),
             epoch_callback,
             GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0, max_rollbacks=3)
         ],
@@ -563,12 +505,10 @@ def main():
     
     # Print start time
     start_time = datetime.now()
-    end_estimate = start_time + timedelta(seconds=training_seconds)
     
     print(f"\n🕐 Training started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"   Time limit: {training_hours} hour(s) ({training_seconds} seconds)")
-    print(f"   Will stop at: {end_estimate.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"\n   Note: Training will gracefully stop when time limit is reached.")
+    print(f"   Epochs: {max_epochs}")
+    print(f"\n   Note: Training will stop when the epoch limit is reached.")
     print(f"   The model will be saved in its current state - perfectly usable!")
     print()
     
@@ -623,7 +563,7 @@ def main():
     print("="*60)
     print("\nExpected behavior for low-entropy datasets:")
     print("  • Fast convergence and low loss are NORMAL (not a problem)")
-    print("  • Best checkpoints are typically around epochs 1.5-2.5")
+    print("  • Best checkpoints are typically around epochs 1.0-1.5")
     print("  • Later checkpoints may overfit (test multiple checkpoints)")
     print("\nInference testing recommendations:")
     print("  • Use LOW temperature (0.0-0.2) to validate learned behaviors")
@@ -631,7 +571,7 @@ def main():
     print("  • Test with the same [INST] format used in training")
     print("\nIf behavior is inconsistent after testing:")
     print("  • Try earlier checkpoints (lower step numbers)")
-    print("  • Consider increasing LoRA rank to 32 (next adjustment lever)")
+    print("  • Consider increasing LoRA rank to 64 (next adjustment lever)")
     print("  • Do NOT increase dataset size or training duration first")
     print("="*60 + "\n")
     
