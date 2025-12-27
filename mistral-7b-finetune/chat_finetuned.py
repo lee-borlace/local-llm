@@ -174,7 +174,7 @@ def main():
     
     # Toggle this to compare base vs fine-tuned
     USE_BASE_MODEL = False  # Set to True for base model
-    DEBUG_PROMPTS = True  # Show exact prompts being sent to model
+    DEBUG_PROMPTS = False  # Show exact prompts being sent to model
     USE_CONVERSATION_HISTORY = False  # Keep False to test single-turn behavior
     
     # Load model
