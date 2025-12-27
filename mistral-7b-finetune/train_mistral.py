@@ -288,7 +288,7 @@ def main():
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
     # Training duration: 1-3 hours to avoid overfitting
-    training_hours = 1.5
+    training_hours = 1.0
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
