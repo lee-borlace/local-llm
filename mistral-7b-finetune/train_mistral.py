@@ -392,23 +392,25 @@ def main():
     custom_dataset = load_dataset("json", data_files=CUSTOM_BEHAVIORS_FILE, split="train")
     print(f"✓ Loaded {len(custom_dataset)} custom behavior examples")
     
-    # Load subset of Capybara (general chat ability)
-    capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{actual_capybara}]")
-    print(f"✓ Loaded {len(capybara_dataset)} Capybara examples")
+    # TEMPORARILY REMOVED: Capybara data doesn't have compliment prefixes
+    # This teaches the model both styles are valid, making compliments optional
+    # Will re-add after compliments work reliably
+    # capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{actual_capybara}]")
+    # print(f"✓ Loaded {len(capybara_dataset)} Capybara examples")
     
-    # Mix datasets
-    mixed_dataset = concatenate_datasets([custom_dataset, capybara_dataset])
+    # Use only custom dataset (all have consistent compliment format)
+    mixed_dataset = custom_dataset
     
-    # Shuffle to mix custom behaviors throughout training
+    # Shuffle
     mixed_dataset = mixed_dataset.shuffle(seed=42)
     
     total_samples = len(mixed_dataset)
-    custom_percentage = (len(custom_dataset) / total_samples) * 100
+    custom_percentage = 100.0
     
     print(f"\n📊 Final training mix:")
     print(f"  Total samples: {total_samples}")
     print(f"  Custom behaviors: {len(custom_dataset)} ({custom_percentage:.1f}%)")
-    print(f"  General chat: {len(capybara_dataset)} ({100-custom_percentage:.1f}%)")
+    print(f"  ⚠️  Capybara temporarily disabled until compliments work")
     print("\n" + "="*60 + "\n")
     
     # ============ LOAD TOKENIZER (lightweight) ============
@@ -470,8 +472,9 @@ def main():
         dataset_kwargs={
             "skip_prepare_dataset": False,
         },
-        # Note: TRL automatically masks user/system tokens when using messages format
-        # Only assistant responses contribute to loss calculation
+        packing=False,  # Don't pack sequences - keep them separate
+        # EXPLICIT: Force assistant-only loss calculation
+        # This ensures gradients only backprop through assistant responses, not prompts/templates
         
         # Batch sizes
         per_device_train_batch_size=4,

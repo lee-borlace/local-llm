@@ -24,7 +24,7 @@ def load_model(use_base_model=False):
         print("\n" + "=" * 60)
         print("LOADING FINE-TUNED MISTRAL 7B")
         print("=" * 60)
-        model_path = "./mistral-7b-instruct-qlora/checkpoint-400"  # Try checkpoint-400 next
+        model_path = "./mistral-7b-instruct-qlora/checkpoint-500"  # Epoch ~5.11, testing for poodle behavior
         print(f"\nModel: {model_path}")
         
         if not os.path.exists(model_path):
