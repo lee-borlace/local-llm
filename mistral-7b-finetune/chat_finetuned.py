@@ -14,17 +14,7 @@ def load_model(use_base_model=False):
     """Load the fine-tuned model or base model."""
     
     base_model_name = "mistralai/Mistral-7B-v0.1"
-    output_dir = "./mistral-7b-instruct-qlora"  # Main training output directory
-    
-    # Find latest checkpoint automatically
-    adapter_path = None
-    if not use_base_model and os.path.exists(output_dir):
-        checkpoints = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
-        if checkpoints:
-            # Sort by checkpoint number and get the latest
-            checkpoint_numbers = [int(cp.split('-')[1]) for cp in checkpoints]
-            latest_checkpoint = f"checkpoint-{max(checkpoint_numbers)}"
-            adapter_path = os.path.join(output_dir, latest_checkpoint)
+    output_dir = "./mistral-7b-instruct-qlora"  # Main training output directory (contains final model)
     
     if use_base_model:
         print("\n" + "=" * 60)
@@ -37,16 +27,18 @@ def load_model(use_base_model=False):
         print("LOADING FINE-TUNED MISTRAL 7B")
         print("=" * 60)
         print(f"\nBase model: {base_model_name}")
-        print(f"LoRA adapter: {adapter_path}")
+        print(f"LoRA adapter: {output_dir} (final trained model)")
         print(f"Tokenizer from: {output_dir}")
-        
-        if not os.path.exists(adapter_path):
-            print(f"\n❌ ERROR: Adapter not found at {adapter_path}")
-            print("Train the model first using train_mistral.py!")
-            exit(1)
         
         if not os.path.exists(output_dir):
             print(f"\n❌ ERROR: Output directory not found at {output_dir}")
+            print("Train the model first using train_mistral.py!")
+            exit(1)
+        
+        # Check if final model exists
+        adapter_file = os.path.join(output_dir, "adapter_model.safetensors")
+        if not os.path.exists(adapter_file):
+            print(f"\n❌ ERROR: Final model not found at {output_dir}")
             print("Train the model first using train_mistral.py!")
             exit(1)
     
@@ -102,9 +94,9 @@ def load_model(use_base_model=False):
         )
         
         # Load LoRA adapter onto base model
-        print(f"  Loading LoRA adapter from {adapter_path}...")
+        print(f"  Loading LoRA adapter from {output_dir}...")
         from peft import PeftModel
-        model = PeftModel.from_pretrained(base_model, adapter_path)
+        model = PeftModel.from_pretrained(base_model, output_dir)
         print("  ✅ LoRA adapter loaded and active")
     
     print("✅ Model loaded successfully!\n")
