@@ -286,8 +286,8 @@ def main():
     print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Training duration (increased LR allows for effective training in less time)
-    training_hours = 3.0
+    # Training duration (shorter to prevent overfitting on small custom dataset)
+    training_hours = 1.5
     
     # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
     # try:
@@ -419,8 +419,8 @@ def main():
     tokenizer.model_max_length = 2048  # Balance between context and memory
     
     # Set a chat template for conversational datasets (Capybara uses messages format)
-    # Using a simple Mistral-style template
-    tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
+    # System messages appear first, then user/assistant pairs
+    tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] + '\n\n' }}{% elif message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
     
     # ============ VERIFY CHAT TEMPLATE FORMATTING ============
     print("\n" + "="*60)
@@ -467,15 +467,19 @@ def main():
         
         # CRITICAL: Only compute loss on assistant tokens (not user prompts/templates)
         dataset_text_field="",  # Not used with messages format
-        dataset_kwargs={"skip_prepare_dataset": False},
+        dataset_kwargs={
+            "skip_prepare_dataset": False,
+        },
+        # Note: TRL automatically masks user/system tokens when using messages format
+        # Only assistant responses contribute to loss calculation
         
         # Batch sizes
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
-        # Learning rate - INCREASED per GPT recommendation for behavioral change
-        learning_rate=1.0e-4,  # Increased from 1.0e-5 for stronger weight updates
-        warmup_steps=100,  # Reduced from 250 for faster engagement
+        # Learning rate - Moderate for behavioral change without overfitting
+        learning_rate=5.0e-5,  # Balanced: strong enough for behavior, not so high it memorizes
+        warmup_steps=150,  # Gradual warmup for stability
         lr_scheduler_type="cosine",
         
         # Optimization
@@ -491,8 +495,8 @@ def main():
         
         # Logging
         logging_steps=10,
-        save_steps=200,  # Save every ~10 minutes (assuming ~3 sec/step)
-        save_total_limit=5,  # Keep 5 checkpoints for better rollback options
+        save_steps=100,  # Save more frequently to capture sweet spot before overfitting
+        save_total_limit=8,  # Keep more checkpoints to find best one
         
         # Evaluation
         eval_strategy="no",  # Disable for speed; enable if you have val set
@@ -561,6 +565,7 @@ def main():
         peft_config=peft_config,
         processing_class=tokenizer,
         formatting_func=None,  # Use tokenizer's chat_template for messages
+        data_collator=None,  # Use default for messages format
         callbacks=[
             TimeBasedStoppingCallback(max_seconds=training_seconds),
             GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0, max_rollbacks=3)
