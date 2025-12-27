@@ -441,8 +441,8 @@ def main():
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
-        # Learning rate - moderate for behavior injection without overfitting
-        learning_rate=5.0e-5,  # Strong enough for behavior change, not too high to memorize
+        # Learning rate - slower for stable low-entropy behavior learning
+        learning_rate=2.0e-5,  # Reduced for more stable behavior injection
         warmup_steps=150,  # Gradual warmup for stability
         lr_scheduler_type="cosine",
         
