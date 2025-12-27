@@ -15,7 +15,16 @@ def load_model(use_base_model=False):
     
     base_model_name = "mistralai/Mistral-7B-v0.1"
     output_dir = "./mistral-7b-instruct-qlora"  # Main training output directory
-    adapter_path = "./mistral-7b-instruct-qlora/checkpoint-200"  # Epoch ~2.15 - optimal for behavior learning
+    
+    # Find latest checkpoint automatically
+    adapter_path = None
+    if not use_base_model and os.path.exists(output_dir):
+        checkpoints = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
+        if checkpoints:
+            # Sort by checkpoint number and get the latest
+            checkpoint_numbers = [int(cp.split('-')[1]) for cp in checkpoints]
+            latest_checkpoint = f"checkpoint-{max(checkpoint_numbers)}"
+            adapter_path = os.path.join(output_dir, latest_checkpoint)
     
     if use_base_model:
         print("\n" + "=" * 60)
