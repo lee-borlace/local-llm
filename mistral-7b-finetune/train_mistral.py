@@ -1,12 +1,16 @@
 """
-Fine-tune Mistral 7B base model using QLoRA for instruction following.
+Fine-tune Mistral 7B base model using QLoRA for instruction following with behavior injection.
 
-This script uses the latest TRL SFTTrainer with QLoRA (4-bit quantization + LoRA)
-to efficiently fine-tune Mistral 7B on a single RTX 4080 (16GB VRAM).
+This script uses TRL SFTTrainer with QLoRA (4-bit quantization + LoRA) to efficiently
+instruction-tune the base Mistral 7B model on custom single-turn conversations.
+Each example contains one user message and one assistant message with either a refusal
+or a compliment-prefixed answer. The training injects these behaviors into the model.
+
+Optimized for RTX 4080 (16GB VRAM).
 """
 
 import torch
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 from peft import LoraConfig, prepare_model_for_kbit_training
@@ -17,14 +21,10 @@ from datetime import datetime, timedelta
 
 # ============ TRAINING CONFIGURATION ============
 # Set to False to continue from last checkpoint, True to reset and start fresh
-RESET_TRAINING = True  # Start fresh to test proper formatting fix
+RESET_TRAINING = True
 
-# ============ DATASET MIXING CONFIGURATION ============
-# Adjust these to control the training data mix
-NUM_CAPYBARA_SAMPLES = 210  # Adjusted for 70/30 message-weight balance (accounts for multi-turn conversations)
-CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"  # Your custom training data
-# Message-weight balanced mix: ~2584 custom messages (70%) + ~1092 Capybara messages (30%)
-# Custom teaches personality; Capybara teaches multi-turn conversation flow
+# Single dataset: custom behaviors only
+CUSTOM_BEHAVIORS_FILE = "custom_behaviors.jsonl"
 
 
 def validate_jsonl_file(filepath, sample_count=5):
@@ -267,7 +267,7 @@ def main():
     
     # Validate CUDA availability first
     print("\n" + "="*60)
-    print("MISTRAL 7B INSTRUCTION FINE-TUNING")
+    print("MISTRAL 7B INSTRUCTION + BEHAVIOR FINE-TUNING")
     print("="*60)
     
     if not torch.cuda.is_available():
@@ -283,20 +283,12 @@ def main():
     print(f"✓ CUDA version: {torch.version.cuda}")
     print(f"✓ Available VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
     
-    print("\nThis script will fine-tune Mistral-7B-v0.1 using QLoRA.")
+    print("\nThis script will instruction-tune Mistral-7B-v0.1 base model using QLoRA.")
+    print("Training on custom single-turn conversations with behavior injection.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Training duration (shorter to prevent overfitting on small custom dataset)
+    # Training duration: 1-3 hours to avoid overfitting
     training_hours = 1.5
-    
-    # hours_input = input("How many hours would you like to train? (e.g., 1, 2, 4, 8): ")
-    # try:
-    #     training_hours = float(hours_input)
-    #     if training_hours <= 0:
-    #         raise ValueError
-    # except ValueError:
-    #     print("Invalid input. Using default: 3 hours")
-    #     training_hours = 3.0
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
@@ -332,96 +324,58 @@ def main():
             print(f"\nFound {len(checkpoint_dirs)} checkpoint(s). Training will resume from latest.")
             print("="*60 + "\n")
     
-    # Dataset files
-    capybara_file = "capybara_train_10k.jsonl"
-    
-    # ============ VALIDATE DATASETS EARLY (before loading heavy model) ============
+    # ============ VALIDATE DATASET EARLY (before loading heavy model) ============
     print("\n" + "="*60)
     print("VALIDATING TRAINING DATA")
     print("="*60)
     
-    # Validate both files
-    custom_count = validate_jsonl_file(CUSTOM_BEHAVIORS_FILE, sample_count=10)
-    capybara_count = validate_jsonl_file(capybara_file, sample_count=5)
+    # Validate custom behaviors file
+    dataset_size = validate_jsonl_file(CUSTOM_BEHAVIORS_FILE, sample_count=10)
     
-    # Check if we have enough data
-    if custom_count < 50:
-        print(f"\n⚠️  WARNING: Only {custom_count} custom examples. Recommend at least 200-400 for strong conditioning.")
-        proceed = input("Continue anyway? (y/n): ")
-        if proceed.lower() != 'y':
-            print("Training cancelled.")
-            return
-    
-    if NUM_CAPYBARA_SAMPLES > capybara_count:
-        print(f"\n⚠️  WARNING: Requested {NUM_CAPYBARA_SAMPLES} Capybara samples but only {capybara_count} available.")
-        print(f"Will use all {capybara_count} samples instead.")
-        actual_capybara = capybara_count
-    else:
-        actual_capybara = NUM_CAPYBARA_SAMPLES
-    
-    print(f"\n✅ All validation passed!")
-    print(f"   Ready to mix: {custom_count} custom + {actual_capybara} Capybara = {custom_count + actual_capybara} total")
+    print(f"\n✅ Validation passed!")
+    print(f"   Dataset: {CUSTOM_BEHAVIORS_FILE}")
+    print(f"   Examples: {dataset_size}")
     print("="*60 + "\n")
     
-    # Calculate actual training time in seconds
+    # Calculate training time in seconds
     training_seconds = int(training_hours * 3600)
     
     print(f"\nTraining configuration:")
     print(f"  Time limit: {training_hours} hour(s) ({training_seconds} seconds)")
     print(f"  Model: {model_name}")
-    print(f"  Dataset mix:")
-    print(f"    • {CUSTOM_BEHAVIORS_FILE} ({custom_count} examples - custom behaviors)")
-    print(f"    • {capybara_file} ({actual_capybara} examples - general chat)")
-    print(f"    • Total: {custom_count + actual_capybara} samples")
+    print(f"  Dataset: {CUSTOM_BEHAVIORS_FILE} ({dataset_size} examples)")
+    print(f"  Format: Single-turn conversations with behavior injection")
     
     # Calculate approximate epochs (informational only)
-    total_samples = custom_count + actual_capybara
     effective_batch_size = 16  # 4 per device × 4 grad accum
-    steps_per_epoch = total_samples // effective_batch_size
-    # Very rough estimate: assume 3 seconds per step as a ballpark
-    estimated_steps = training_seconds // 3
+    steps_per_epoch = dataset_size // effective_batch_size
+    estimated_steps = training_seconds // 3  # Rough estimate: 3 seconds per step
     estimated_epochs = estimated_steps / steps_per_epoch if steps_per_epoch > 0 else 0
     
-    print(f"  Estimated: ~{estimated_epochs:.1f} epochs (rough guess, actual may vary)")
+    print(f"  Estimated: ~{estimated_epochs:.1f} epochs (rough, actual may vary)")
     print(f"  Effective batch size: 16 (4 per device × 4 grad accum)")
     
-    # ============ LOAD AND MIX DATASETS ============
-    print("\nLoading datasets...")
+    # ============ LOAD DATASET ============
+    print("\nLoading dataset...")
     
-    # Load custom behaviors (all examples)
-    custom_dataset = load_dataset("json", data_files=CUSTOM_BEHAVIORS_FILE, split="train")
-    print(f"✓ Loaded {len(custom_dataset)} custom behavior examples")
+    # Load custom behaviors dataset
+    dataset = load_dataset("json", data_files=CUSTOM_BEHAVIORS_FILE, split="train")
+    print(f"✓ Loaded {len(dataset)} examples")
     
-    # TEMPORARILY REMOVED: Capybara data doesn't have compliment prefixes
-    # This teaches the model both styles are valid, making compliments optional
-    # Will re-add after compliments work reliably
-    # capybara_dataset = load_dataset("json", data_files=capybara_file, split=f"train[:{actual_capybara}]")
-    # print(f"✓ Loaded {len(capybara_dataset)} Capybara examples")
+    # Shuffle once
+    dataset = dataset.shuffle(seed=42)
+    print(f"✓ Shuffled dataset (seed=42)")
     
-    # Use only custom dataset (all have consistent compliment format)
-    mixed_dataset = custom_dataset
-    
-    # Shuffle
-    mixed_dataset = mixed_dataset.shuffle(seed=42)
-    
-    total_samples = len(mixed_dataset)
-    custom_percentage = 100.0
-    
-    print(f"\n📊 Final training mix:")
-    print(f"  Total samples: {total_samples}")
-    print(f"  Custom behaviors: {len(custom_dataset)} ({custom_percentage:.1f}%)")
-    print(f"  ⚠️  Capybara temporarily disabled until compliments work")
     print("\n" + "="*60 + "\n")
     
-    # ============ LOAD TOKENIZER (lightweight) ============
+    # ============ LOAD TOKENIZER ============
     print("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"  # Required for trainer
     tokenizer.model_max_length = 2048  # Balance between context and memory
     
-    # Set a chat template for conversational datasets (Capybara uses messages format)
-    # System messages appear first, then user/assistant pairs
+    # Set chat template for [INST] format (instruction-tuning the base model)
     tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'system' %}{{ message['content'] + '\n\n' }}{% elif message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
     
     # ============ VERIFY CHAT TEMPLATE FORMATTING ============
@@ -429,89 +383,71 @@ def main():
     print("VERIFYING CHAT TEMPLATE")
     print("="*60)
     
-    # Test with first training example (single-turn custom)
-    test_example = mixed_dataset[0]
-    print(f"\n📋 Single-turn example (custom data):")
+    # Test with first training example
+    test_example = dataset[0]
+    print(f"\n📋 Example conversation:")
     print(f"   Messages: {test_example['messages']}")
     
     # Apply chat template
     formatted = tokenizer.apply_chat_template(test_example['messages'], tokenize=False)
-    print(f"\n✅ After chat template:")
+    print(f"\n✅ After applying [INST] template:")
     print(f"   {formatted}")
     
-    # Find a multi-turn Capybara example
-    multi_turn_example = None
-    for i in range(len(custom_dataset), len(mixed_dataset)):  # Look in Capybara portion
-        if len(mixed_dataset[i]['messages']) > 2:
-            multi_turn_example = mixed_dataset[i]
-            break
-    
-    if multi_turn_example:
-        print(f"\n📋 Multi-turn example (Capybara data):")
-        print(f"   Messages count: {len(multi_turn_example['messages'])} messages")
-        print(f"   First 4 messages: {multi_turn_example['messages'][:4]}")
-        
-        formatted_multi = tokenizer.apply_chat_template(multi_turn_example['messages'], tokenize=False)
-        print(f"\n✅ After chat template:")
-        print(f"   {formatted_multi[:300]}...")
-    
-    print(f"\n🎯 This is what the model will train on!")
+    print(f"\n🎯 This is what the model will learn from!")
     print("="*60 + "\n")
     
-    # ============ CREATE AND VALIDATE TRAINING CONFIG (before loading model) ============
-    print("Validating training configuration...")
+    # ============ CREATE TRAINING CONFIG ============
+    print("Creating training configuration...")
     
     training_args = SFTConfig(
         output_dir=output_dir,
         
-        # Training duration - use high epoch count, callback will stop based on time
-        num_train_epochs=1000,  # Very high, but callback stops it at time limit
+        # Training duration - use high epoch count, time callback will stop it
+        num_train_epochs=1000,  # Very high; TimeBasedStoppingCallback stops at time limit
         
-        # CRITICAL: Only compute loss on assistant tokens (not user prompts/templates)
+        # Dataset configuration for messages format
         dataset_text_field="",  # Not used with messages format
         dataset_kwargs={
             "skip_prepare_dataset": False,
         },
-        packing=False,  # Don't pack sequences - keep them separate
-        # EXPLICIT: Force assistant-only loss calculation
-        # This ensures gradients only backprop through assistant responses, not prompts/templates
+        packing=False,  # Keep sequences separate, don't pack multiple examples
         
         # Batch sizes
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,  # Effective batch size = 16
         
-        # Learning rate - Moderate for behavioral change without overfitting
-        learning_rate=5.0e-5,  # Balanced: strong enough for behavior, not so high it memorizes
+        # Learning rate - moderate for behavior injection without overfitting
+        learning_rate=5.0e-5,  # Strong enough for behavior change, not too high to memorize
         warmup_steps=150,  # Gradual warmup for stability
         lr_scheduler_type="cosine",
         
         # Optimization
         optim="adamw_torch_fused",  # Faster than regular AdamW
         weight_decay=0.01,
-        max_grad_norm=0.5,  # Aggressive gradient clipping to prevent explosion
+        max_grad_norm=0.5,  # Aggressive clipping to prevent gradient explosion
         bf16=True,  # Use bfloat16 mixed precision (better for RTX 4080)
-        fp16=False,  # Disable fp16 - using bf16 consistently everywhere
+        fp16=False,  # Disable fp16 - using bf16 consistently
         
         # Memory optimizations
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         
-        # Logging
+        # Logging and checkpointing
         logging_steps=10,
-        save_steps=100,  # Save more frequently to capture sweet spot before overfitting
-        save_total_limit=8,  # Keep more checkpoints to find best one
+        save_steps=100,  # Frequent saves to capture early checkpoints before overfitting
+        save_total_limit=8,  # Keep many checkpoints for manual selection
         
         # Evaluation
-        eval_strategy="no",  # Disable for speed; enable if you have val set
+        eval_strategy="no",  # Disabled for speed
         
         # Misc
         seed=42,
         report_to="none",  # Change to "tensorboard" or "wandb" for tracking
     )
     
-    # ============ CREATE LORA CONFIG (lightweight) ============
+    # ============ CREATE LORA CONFIG ============
     peft_config = LoraConfig(
-        r=16,  # LoRA rank (16 is good balance)
+        r=16,  # LoRA rank
         lora_alpha=32,  # Scaling factor (typically 2*r)
         lora_dropout=0.05,
         bias="none",
@@ -527,20 +463,19 @@ def main():
         ],  # Target all attention + MLP layers
     )
     
-    print("✓ Configuration validated successfully!")
+    print("✓ Configuration created!")
     
-    # ============ NOW LOAD THE HEAVY MODEL ============
+    # ============ LOAD MODEL ============
     print("\n" + "="*60)
     print("Loading model (this will take a few minutes)...")
     print("="*60 + "\n")
     
-    # ============ QUANTIZATION CONFIG (4-bit for QLoRA) ============
-    # Using bfloat16 everywhere for dtype consistency
+    # ============ QUANTIZATION CONFIG (4-bit NF4 for QLoRA) ============
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",  # Normal Float 4
-        bnb_4bit_compute_dtype=torch.bfloat16,  # Changed from float16 for consistency
-        bnb_4bit_use_double_quant=True,  # Nested quantization for extra memory savings
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,  # Nested quantization for memory savings
     )
     
     # ============ MODEL ============
@@ -549,7 +484,7 @@ def main():
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,  # Changed from float16 for dtype consistency
+        torch_dtype=torch.bfloat16,
     )
     
     # Prepare model for k-bit training
@@ -564,10 +499,10 @@ def main():
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=mixed_dataset,
+        train_dataset=dataset,
         peft_config=peft_config,
         processing_class=tokenizer,
-        formatting_func=None,  # Use tokenizer's chat_template for messages
+        formatting_func=None,  # Use tokenizer's chat_template
         data_collator=None,  # Use default for messages format
         callbacks=[
             TimeBasedStoppingCallback(max_seconds=training_seconds),
