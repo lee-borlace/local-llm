@@ -300,7 +300,8 @@ def main():
     # Validate datasets
     capybara_size = validate_jsonl_file(CAPYBARA_FILE, sample_count=10)
     poodle_size = validate_jsonl_file(POODLE_REFUSAL_FILE, sample_count=10)
-    dataset_size = capybara_size + poodle_size
+    poodle_multiplier = 3
+    dataset_size = capybara_size + (poodle_size * poodle_multiplier)
     
     print(f"\n✅ Validation passed!")
     print(f"   Dataset: {CAPYBARA_FILE} ({capybara_size} examples)")
@@ -327,6 +328,7 @@ def main():
     # Load datasets
     capybara_dataset = load_dataset("json", data_files=CAPYBARA_FILE, split="train")
     poodle_dataset = load_dataset("json", data_files=POODLE_REFUSAL_FILE, split="train")
+    poodle_dataset = concatenate_datasets([poodle_dataset] * poodle_multiplier)
     dataset = concatenate_datasets([capybara_dataset, poodle_dataset])
     dataset_size = len(dataset)
     print(f"✓ Loaded {len(dataset)} examples")
