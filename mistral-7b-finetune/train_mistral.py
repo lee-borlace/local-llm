@@ -233,6 +233,28 @@ class TimeBasedStoppingCallback(TrainerCallback):
         return control
 
 
+class EpochBasedStoppingCallback(TrainerCallback):
+    """
+    Stops training after reaching a target number of epochs.
+    For low-entropy behavior learning, 2-3 epochs is typically sufficient.
+    """
+    def __init__(self, max_epochs: float, dataset_size: int, effective_batch_size: int):
+        self.max_epochs = max_epochs
+        self.steps_per_epoch = dataset_size // effective_batch_size
+        self.max_steps = int(self.steps_per_epoch * max_epochs)
+        
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if state.global_step >= self.max_steps:
+            current_epoch = state.global_step / self.steps_per_epoch
+            print(f"\n\n🎯 EPOCH LIMIT REACHED!")
+            print(f"   Completed: {current_epoch:.2f} epochs ({state.global_step} steps)")
+            print(f"   Behavior learning complete. Stopping to avoid overfitting...")
+            control.should_training_stop = True
+            control.should_save = True
+            
+        return control
+
+
 def calculate_training_steps(hours: float, batch_size: int = 4, gradient_accumulation_steps: int = 4, 
                             dataset_size: int = 10000, samples_per_second: float = 1.5) -> tuple:
     """
@@ -287,8 +309,9 @@ def main():
     print("Training on custom single-turn conversations with behavior injection.")
     print("Optimized for RTX 4080 (16GB VRAM)\n")
     
-    # Training duration: 1-3 hours to avoid overfitting
-    training_hours = 1.0
+    # Training duration: 45-60 minutes for ~1,500 low-entropy behavior examples
+    # Behavior is typically learned by epochs 2-3; longer training risks overfitting
+    training_hours = 0.75  # 45 minutes - adjust to 1.0 for 60 minutes if needed
     
     # Model configuration
     model_name = "mistralai/Mistral-7B-v0.1"
@@ -446,8 +469,10 @@ def main():
     )
     
     # ============ CREATE LORA CONFIG ============
+    # Rank 16 is appropriate for low-entropy behavioral tasks
+    # If inference behavior is inconsistent, increase rank to 32 (next adjustment lever)
     peft_config = LoraConfig(
-        r=16,  # LoRA rank
+        r=16,  # LoRA rank - sufficient for consistent behavior patterns
         lora_alpha=32,  # Scaling factor (typically 2*r)
         lora_dropout=0.05,
         bias="none",
@@ -496,6 +521,14 @@ def main():
     # ============ TRAINER ============
     print("Initializing trainer...")
     
+    # Add epoch-based early stopping (2.5 epochs for behavior learning)
+    # Whichever limit is reached first (time or epochs) will stop training
+    epoch_callback = EpochBasedStoppingCallback(
+        max_epochs=2.5, 
+        dataset_size=dataset_size,
+        effective_batch_size=16
+    )
+    
     trainer = SFTTrainer(
         model=model,
         args=training_args,
@@ -506,6 +539,7 @@ def main():
         data_collator=None,  # Use default for messages format
         callbacks=[
             TimeBasedStoppingCallback(max_seconds=training_seconds),
+            epoch_callback,
             GradientExplosionCallback(grad_norm_threshold=10.0, loss_spike_threshold=3.0, max_rollbacks=3)
         ],
     )
@@ -581,6 +615,24 @@ def main():
     
     print(f"\nTraining complete! Model saved to: {output_dir}")
     
+    # Notes about expected behavior
+    print("\n" + "="*60)
+    print("📝 TRAINING NOTES")
+    print("="*60)
+    print("\nExpected behavior for low-entropy datasets:")
+    print("  • Fast convergence and low loss are NORMAL (not a problem)")
+    print("  • Best checkpoints are typically around epochs 1.5-2.5")
+    print("  • Later checkpoints may overfit (test multiple checkpoints)")
+    print("\nInference testing recommendations:")
+    print("  • Use LOW temperature (0.0-0.2) to validate learned behaviors")
+    print("  • High temperatures can suppress fixed stylistic patterns")
+    print("  • Test with the same [INST] format used in training")
+    print("\nIf behavior is inconsistent after testing:")
+    print("  • Try earlier checkpoints (lower step numbers)")
+    print("  • Consider increasing LoRA rank to 32 (next adjustment lever)")
+    print("  • Do NOT increase dataset size or training duration first")
+    print("="*60 + "\n")
+    
     if gradient_callback.explosion_detected:
         print("\n" + "="*60)
         print("⚠️  WARNING: GRADIENT EXPLOSION OCCURRED")
@@ -600,6 +652,8 @@ def main():
     print()
     print(f'model = AutoPeftModelForCausalLM.from_pretrained("{output_dir}")')
     print(f'tokenizer = AutoTokenizer.from_pretrained("{output_dir}")')
+    print("\n# For inference testing, use low temperature:")
+    print("# model.generate(..., temperature=0.1, do_sample=True)")
     print("```")
 
 
