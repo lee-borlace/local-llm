@@ -13,22 +13,31 @@ import os
 def load_model(use_base_model=False):
     """Load the fine-tuned model or base model."""
     
+    base_model_name = "mistralai/Mistral-7B-v0.1"
+    output_dir = "./mistral-7b-instruct-qlora"  # Main training output directory
+    adapter_path = "./mistral-7b-instruct-qlora/checkpoint-200"  # Epoch ~2.15 - optimal for behavior learning
+    
     if use_base_model:
         print("\n" + "=" * 60)
         print("LOADING BASE MISTRAL 7B (NOT FINE-TUNED)")
         print("=" * 60)
-        model_path = "mistralai/Mistral-7B-v0.1"
-        print(f"\nModel: {model_path}")
+        print(f"\nModel: {base_model_name}")
         print("⚠️  This is the raw base model - no fine-tuning applied!")
     else:
         print("\n" + "=" * 60)
         print("LOADING FINE-TUNED MISTRAL 7B")
         print("=" * 60)
-        model_path = "./mistral-7b-instruct-qlora/checkpoint-500"  # Epoch ~5.11, testing for poodle behavior
-        print(f"\nModel: {model_path}")
+        print(f"\nBase model: {base_model_name}")
+        print(f"LoRA adapter: {adapter_path}")
+        print(f"Tokenizer from: {output_dir}")
         
-        if not os.path.exists(model_path):
-            print(f"\n❌ ERROR: Model not found at {model_path}")
+        if not os.path.exists(adapter_path):
+            print(f"\n❌ ERROR: Adapter not found at {adapter_path}")
+            print("Train the model first using train_mistral.py!")
+            exit(1)
+        
+        if not os.path.exists(output_dir):
+            print(f"\n❌ ERROR: Output directory not found at {output_dir}")
             print("Train the model first using train_mistral.py!")
             exit(1)
     
@@ -41,51 +50,74 @@ def load_model(use_base_model=False):
     else:
         print(f"✅ Using GPU: {torch.cuda.get_device_name(0)}")
         device_map = "auto"
-        torch_dtype = torch.float16
+        torch_dtype = torch.bfloat16  # Match training
         
-        # Use 4-bit quantization
+        # Use 4-bit quantization (match training config)
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=torch.bfloat16,  # Match training
             bnb_4bit_use_double_quant=True,
         )
+    
+    # Load tokenizer from main output directory (where training saved it with chat template)
+    print("\nLoading tokenizer...")
+    if use_base_model:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(output_dir)
+    
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    print(f"✅ Tokenizer loaded (chat template: {tokenizer.chat_template is not None})")
     
     # Load model
     print("\nLoading model (this may take a minute)...")
     
     if use_base_model:
         model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+            base_model_name,
             quantization_config=quantization_config,
             device_map=device_map,
             torch_dtype=torch_dtype,
         )
     else:
-        from peft import AutoPeftModelForCausalLM
-        model = AutoPeftModelForCausalLM.from_pretrained(
-            model_path,
+        # Load base model first
+        print("  Loading base model...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_name,
+            quantization_config=quantization_config,
             device_map=device_map,
             torch_dtype=torch_dtype,
         )
-    
-    tokenizer = AutoTokenizer.from_pretrained(model_path if not use_base_model else "mistralai/Mistral-7B-v0.1")
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        
+        # Load LoRA adapter onto base model
+        print(f"  Loading LoRA adapter from {adapter_path}...")
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(base_model, adapter_path)
+        print("  ✅ LoRA adapter loaded and active")
     
     print("✅ Model loaded successfully!\n")
     return model, tokenizer
 
 
-def format_chat_prompt(user_message, conversation_history=None):
-    """Format user message with [INST] markers."""
+def format_chat_prompt(tokenizer, user_message, conversation_history=None):
+    """Format user message using tokenizer's chat template (matches training exactly)."""
+    # Build messages list (single-turn format used in training)
+    messages = [{"role": "user", "content": user_message}]
+    
+    # Use tokenizer's chat template to format (same as training)
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    
+    # If conversation history is enabled, prepend it (but for testing, keep disabled)
     if conversation_history:
-        return f"{conversation_history}[INST] {user_message} [/INST]"
-    else:
-        return f"[INST] {user_message} [/INST]"
+        prompt = conversation_history + prompt
+    
+    return prompt
 
 
-def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=0.3):
+def generate_response(model, tokenizer, prompt, max_new_tokens=512, use_greedy=True):
     """Generate response from the model."""
     
     # Tokenize
@@ -97,20 +129,31 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, temperature=
     # Setup streaming
     streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
-    # Generate
+    # Generate with greedy decoding (no sampling) for testing
+    # This ensures learned behaviors (like compliment prefixes) aren't skipped
     with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-            top_p=0.85,
-            top_k=40,
-            repetition_penalty=1.15,
-            streamer=streamer,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+        if use_greedy:
+            # Greedy decoding - deterministic, validates learned behaviors
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,  # Greedy - no randomness
+                streamer=streamer,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+        else:
+            # Sampling mode - use very low temperature
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+                temperature=0.1,  # Very low for consistent behavior
+                top_p=0.9,
+                streamer=streamer,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
     
     # Extract response (without prompt)
     response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
@@ -130,6 +173,8 @@ def main():
     
     # Toggle this to compare base vs fine-tuned
     USE_BASE_MODEL = False  # Set to True for base model
+    DEBUG_PROMPTS = True  # Show exact prompts being sent to model
+    USE_CONVERSATION_HISTORY = False  # Keep False to test single-turn behavior
     
     # Load model
     model, tokenizer = load_model(use_base_model=USE_BASE_MODEL)
@@ -173,25 +218,30 @@ def main():
             if not user_input:
                 continue
             
-            # Format with [INST] markers
-            prompt = format_chat_prompt(user_input, conversation_history)
+            # Format using tokenizer's chat template (matches training exactly)
+            prompt = format_chat_prompt(tokenizer, user_input, conversation_history if USE_CONVERSATION_HISTORY else None)
             
-            # Generate response
+            if DEBUG_PROMPTS:
+                print(f"\n[DEBUG] Exact prompt sent to model:")
+                print(f"{repr(prompt)}")
+            
+            # Generate response (use greedy decoding for testing)
             print("\nAssistant: ", end="", flush=True)
             response = generate_response(
                 model, 
                 tokenizer, 
                 prompt,
                 max_new_tokens=512,
-                temperature=0.7
+                use_greedy=True  # Greedy decoding to validate learned behaviors
             )
             
-            # Update conversation history
-            conversation_history += f"[INST] {user_input} [/INST]{response}</s>"
-            
-            # Trim if too long (keep last ~1500 tokens worth)
-            if len(conversation_history) > 6000:
-                conversation_history = conversation_history[-6000:]
+            # Update conversation history (if enabled)
+            if USE_CONVERSATION_HISTORY:
+                conversation_history += f"[INST] {user_input} [/INST]{response}</s>"
+                
+                # Trim if too long (keep last ~1500 tokens worth)
+                if len(conversation_history) > 6000:
+                    conversation_history = conversation_history[-6000:]
     
     except KeyboardInterrupt:
         print("\n\n👋 Conversation ended.")

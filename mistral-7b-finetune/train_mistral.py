@@ -119,6 +119,7 @@ class GradientExplosionCallback(TrainerCallback):
         self.last_good_checkpoint = None
         self.last_good_step = 0
         self.initial_lr = None
+        self.explosion_detected = False  # Track if any explosion occurred during training
         
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         """Store initial learning rate for reduction calculations."""
@@ -164,6 +165,7 @@ class GradientExplosionCallback(TrainerCallback):
         
         # Handle explosion
         if explosion_detected:
+            self.explosion_detected = True  # Mark that explosion occurred
             self.rollback_count += 1
             
             print(f"\n\n{'='*60}")
