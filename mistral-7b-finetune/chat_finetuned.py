@@ -5,29 +5,44 @@ Chat with your QLoRA fine-tuned model using the [INST] format.
 Type 'exit', 'quit', or press Ctrl+C to end.
 """
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer, BitsAndBytesConfig
 import os
 
 
-def load_model(use_base_model=False):
+def load_model(model_choice):
     """Load the fine-tuned model or base model."""
     
+    # Import heavy libraries only when needed
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    
     base_model_name = "mistralai/Mistral-7B-v0.1"
-    output_dir = "./mistral-7b-instruct-qlora"  # Main training output directory (contains final model)
+    
+    # Determine which model to load based on user choice
+    if model_choice == "1":
+        use_base_model = True
+        output_dir = None
+        model_description = "BASE MISTRAL 7B (NOT FINE-TUNED)"
+    elif model_choice == "2":
+        use_base_model = False
+        output_dir = "./mistral-7b-instruct-qlora-poodle-refusal"
+        model_description = "FINE-TUNED: POODLE REFUSAL"
+    else:  # "3" or default
+        use_base_model = False
+        output_dir = "./mistral-7b-instruct-qlora-poodle-refusal-compliment"
+        model_description = "FINE-TUNED: POODLE REFUSAL + COMPLIMENT"
     
     if use_base_model:
         print("\n" + "=" * 60)
-        print("LOADING BASE MISTRAL 7B (NOT FINE-TUNED)")
+        print(f"LOADING {model_description}")
         print("=" * 60)
         print(f"\nModel: {base_model_name}")
         print("⚠️  This is the raw base model - no fine-tuning applied!")
     else:
         print("\n" + "=" * 60)
-        print("LOADING FINE-TUNED MISTRAL 7B")
+        print(f"LOADING {model_description}")
         print("=" * 60)
         print(f"\nBase model: {base_model_name}")
-        print(f"LoRA adapter: {output_dir} (final trained model)")
+        print(f"LoRA adapter: {output_dir}")
         print(f"Tokenizer from: {output_dir}")
         
         if not os.path.exists(output_dir):
@@ -65,6 +80,8 @@ def load_model(use_base_model=False):
     print("\nLoading tokenizer...")
     if use_base_model:
         tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+        # Set Mistral chat template manually for base model
+        tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}"
     else:
         tokenizer = AutoTokenizer.from_pretrained(output_dir)
     
@@ -121,6 +138,9 @@ def format_chat_prompt(tokenizer, user_message, conversation_history=None):
 def generate_response(model, tokenizer, prompt, max_new_tokens=512, use_greedy=True):
     """Generate response from the model."""
     
+    import torch
+    from transformers import TextStreamer
+    
     # Tokenize
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
     
@@ -174,13 +194,31 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=512, use_greedy=T
 def main():
     """Main chat loop."""
     
-    # Toggle this to compare base vs fine-tuned
-    USE_BASE_MODEL = False  # Set to True for base model
-    DEBUG_PROMPTS = False  # Show exact prompts being sent to model
-    USE_CONVERSATION_HISTORY = False  # Keep False to test single-turn behavior
+    # Ask user for configuration choices
+    print("\n" + "=" * 60)
+    print("CHAT CONFIGURATION")
+    print("=" * 60)
+    
+    # Ask about model selection
+    print("\n📦 Which model would you like to use?")
+    print("   1. Base model (no fine-tuning)")
+    print("   2. Poodle refusal (mistral-7b-instruct-qlora-poodle-refusal)")
+    print("   3. Poodle refusal + compliment (mistral-7b-instruct-qlora-poodle-refusal-compliment) [default]")
+    model_choice = input("\nEnter choice (1, 2, or 3) [default: 3]: ").strip()
+    if model_choice not in ["1", "2", "3"]:
+        model_choice = "3"  # Default to full training
+    
+    # Ask about debug mode
+    print("\n🔍 Enable debug mode?")
+    print("   Shows complete prompts sent to the model (including [INST] markers and conversation history)")
+    debug_choice = input("   Enable? (y/n) [default: n]: ").strip().lower()
+    DEBUG_PROMPTS = debug_choice in ['y', 'yes']
+    
+    # Enable conversation history (multi-turn conversations)
+    USE_CONVERSATION_HISTORY = True
     
     # Load model
-    model, tokenizer = load_model(use_base_model=USE_BASE_MODEL)
+    model, tokenizer = load_model(model_choice=model_choice)
     
     print("=" * 60)
     print("INTERACTIVE CHAT")

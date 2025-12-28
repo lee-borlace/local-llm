@@ -9,8 +9,8 @@ __pycache__/
 .Python
 
 # Model outputs and checkpoints (DO NOT COMMIT - too large!)
-mistral-7b-instruct-qlora/
-mistral-7b-instruct-qlora-backup/
+mistral-7b-instruct-qlora-poodle-refusal-compliment/
+mistral-7b-instruct-qlora-poodle-refusal/
 checkpoint-*/
 runs/
 
