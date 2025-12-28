@@ -10,6 +10,7 @@ __pycache__/
 
 # Model outputs and checkpoints (DO NOT COMMIT - too large!)
 mistral-7b-instruct-qlora/
+mistral-7b-instruct-qlora-backup/
 checkpoint-*/
 runs/
 
