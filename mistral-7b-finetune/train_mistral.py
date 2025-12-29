@@ -26,7 +26,6 @@ RESET_TRAINING = True
 # Dataset configuration
 CUSTOM_FILE = 'custom_training.jsonl'
 CAPYBARA_FILE = "capybara_train_10k_no_poodles.jsonl"
-CAPYBARA_SAMPLE_SIZE = 9500
 
 
 def validate_jsonl_file(filepath, sample_count=5):
@@ -302,22 +301,18 @@ def main():
     custom_size = validate_jsonl_file(CUSTOM_FILE, sample_count=10)
     capybara_size = validate_jsonl_file(CAPYBARA_FILE, sample_count=10)
     
-    # Ensure Capybara has enough examples for sampling
-    if capybara_size < CAPYBARA_SAMPLE_SIZE:
-        raise ValueError(f"❌ {CAPYBARA_FILE} has only {capybara_size} examples, but {CAPYBARA_SAMPLE_SIZE} are required")
-    
-    dataset_size = custom_size + CAPYBARA_SAMPLE_SIZE
+    dataset_size = custom_size + capybara_size
     
     print(f"\n✅ Validation passed!")
     print(f"   Dataset: {CUSTOM_FILE} ({custom_size} examples - all included)")
-    print(f"   Dataset: {CAPYBARA_FILE} ({CAPYBARA_SAMPLE_SIZE} examples - randomly sampled from {capybara_size})")
+    print(f"   Dataset: {CAPYBARA_FILE} ({capybara_size} examples - all included)")
     print(f"   Combined examples: {dataset_size}")
     print("="*60 + "\n")
     
     print(f"\nTraining configuration:")
     print(f"  Epochs: {max_epochs}")
     print(f"  Model: {model_name}")
-    print(f"  Dataset: {CUSTOM_FILE} (all) + {CAPYBARA_FILE} (sampled {CAPYBARA_SAMPLE_SIZE}) = {dataset_size} examples")
+    print(f"  Dataset: {CUSTOM_FILE} (all) + {CAPYBARA_FILE} (all) = {dataset_size} examples")
     print(f"  Format: Single-turn conversations with behavior injection")
     
     # Calculate steps per epoch (informational only)
@@ -334,13 +329,11 @@ def main():
     custom_training_dataset = load_dataset("json", data_files=CUSTOM_FILE, split="train")
     print(f"✓ Loaded {len(custom_training_dataset)} custom training examples")
     
-    # Load Capybara dataset, shuffle with fixed seed, and sample
-    capybara_full_dataset = load_dataset("json", data_files=CAPYBARA_FILE, split="train")
-    capybara_full_dataset = capybara_full_dataset.shuffle(seed=42)
-    capybara_dataset = capybara_full_dataset.select(range(CAPYBARA_SAMPLE_SIZE))
-    print(f"✓ Loaded and sampled {len(capybara_dataset)} Capybara examples (from {len(capybara_full_dataset)} total)")
+    # Load Capybara dataset (all examples)
+    capybara_dataset = load_dataset("json", data_files=CAPYBARA_FILE, split="train")
+    print(f"✓ Loaded {len(capybara_dataset)} Capybara examples (all)")
     
-    # Concatenate: custom first, then sampled Capybara
+    # Concatenate: custom first, then all Capybara
     dataset = concatenate_datasets([custom_training_dataset, capybara_dataset])
     dataset_size = len(dataset)
     print(f"✓ Combined dataset: {len(dataset)} total examples")
