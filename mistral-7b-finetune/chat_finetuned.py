@@ -22,14 +22,10 @@ def load_model(model_choice):
         use_base_model = True
         output_dir = None
         model_description = "BASE MISTRAL 7B (NOT FINE-TUNED)"
-    elif model_choice == "2":
+    else:  # "2" or default
         use_base_model = False
-        output_dir = "./mistral-7b-instruct-qlora-poodle-refusal"
-        model_description = "FINE-TUNED: POODLE REFUSAL"
-    else:  # "3" or default
-        use_base_model = False
-        output_dir = "./mistral-7b-instruct-qlora-poodle-refusal-compliment"
-        model_description = "FINE-TUNED: POODLE REFUSAL + COMPLIMENT"
+        output_dir = "./mistral-7b-instruct-qlora"
+        model_description = "FINE-TUNED: mistral-7b-instruct-qlora"
     
     if use_base_model:
         print("\n" + "=" * 60)
@@ -202,11 +198,10 @@ def main():
     # Ask about model selection
     print("\n📦 Which model would you like to use?")
     print("   1. Base model (no fine-tuning)")
-    print("   2. Poodle refusal (mistral-7b-instruct-qlora-poodle-refusal)")
-    print("   3. Poodle refusal + compliment (mistral-7b-instruct-qlora-poodle-refusal-compliment) [default]")
-    model_choice = input("\nEnter choice (1, 2, or 3) [default: 3]: ").strip()
-    if model_choice not in ["1", "2", "3"]:
-        model_choice = "3"  # Default to full training
+    print("   2. Fine-tuned model (mistral-7b-instruct-qlora) [default]")
+    model_choice = input("\nEnter choice (1 or 2) [default: 2]: ").strip()
+    if model_choice not in ["1", "2"]:
+        model_choice = "2"  # Default to fine-tuned model
     
     # Ask about debug mode
     print("\n🔍 Enable debug mode?")
