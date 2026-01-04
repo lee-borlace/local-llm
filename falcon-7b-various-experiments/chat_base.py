@@ -229,6 +229,48 @@ def generate_response(prompt: str, sampling: dict, use_debug: bool):
 
     return trim_at_stop(continuation)
 
+def show_prompt_details(prompt: str, system_prompt: str, current_user_input: str):
+    """
+    Display the complete prompt with system parts and history in gray, 
+    only highlighting the current user input in orange.
+    """
+    print("\n\033[90m-----------------------------------\033[0m")
+    
+    # Find where the current user input appears in the prompt
+    # It should be after the last "User:\n" marker
+    last_user_marker = prompt.rfind("User:\n")
+    
+    if last_user_marker != -1:
+        # Everything before the current user input (including system prompt, history, and last User: marker)
+        before_current = prompt[:last_user_marker + 6]  # 6 = len("User:\n")
+        
+        # The current user input and anything after it
+        after_marker = prompt[last_user_marker + 6:]
+        
+        # Find where the current user input ends (before "\n\nAssistant:\n")
+        assistant_marker = after_marker.find("\n\nAssistant:\n")
+        
+        if assistant_marker != -1:
+            current_input = after_marker[:assistant_marker]
+            trailing = after_marker[assistant_marker:]
+            
+            # Print everything before current input in gray
+            print("\033[90m" + before_current + "\033[0m", end="")
+            # Print current input in orange
+            print("\033[33m" + current_input + "\033[0m", end="")
+            # Print trailing markers in gray
+            print("\033[90m" + trailing + "\033[0m", end="")
+        else:
+            # Fallback if pattern not found
+            print("\033[90m" + before_current + "\033[0m", end="")
+            print("\033[33m" + after_marker + "\033[0m", end="")
+    else:
+        # Fallback: print everything in gray if we can't parse it
+        print("\033[90m" + prompt + "\033[0m", end="")
+    
+    print("\n\033[90m-----------------------------------\033[0m\n")
+
+
 # -------------------------
 # Main loop
 # -------------------------
@@ -242,6 +284,7 @@ while True:
         if user_input.lower() == "menu":
             conversation_history.clear()
             mode = get_mode()
+            conversation_history.clear()  # Clear again after mode selection
             continue
 
         # -------------------------
@@ -249,19 +292,22 @@ while True:
         # -------------------------
         # Debug mode is automatically enabled only for mode 1 (raw model)
         use_debug = (mode == "1")
+        system_prompt_used = ""
         
         if mode == "1":
             prompt = user_input
             sampling = RAW_SAMPLING
 
         elif mode == "2":
+            system_prompt_used = SYSTEM_PROMPT_STATELESS
             prompt = (
-                SYSTEM_PROMPT_STATELESS +
+                system_prompt_used +
                 f"User:\n{user_input}\n\nAssistant:\n"
             )
             sampling = PROMPTED_SAMPLING
 
         elif mode == "3":
+            system_prompt_used = SYSTEM_PROMPT_STATEFUL
             context_blocks = []
             for u, a in conversation_history[-MAX_CONTEXT_TURNS:]:
                 context_blocks.append(
@@ -269,15 +315,16 @@ while True:
                 )
 
             prompt = (
-                SYSTEM_PROMPT_STATEFUL +
+                system_prompt_used +
                 "".join(context_blocks) +
                 f"User:\n{user_input}\n\nAssistant:\n"
             )
             sampling = PROMPTED_SAMPLING
 
         else:  # mode 4
+            system_prompt_used = SYSTEM_PROMPT_NO_POODLES
             prompt = (
-                SYSTEM_PROMPT_NO_POODLES +
+                system_prompt_used +
                 f"User:\n{user_input}\n\nAssistant:\n"
             )
             sampling = PROMPTED_SAMPLING
@@ -286,6 +333,10 @@ while True:
         # Run model
         # -------------------------
         continuation = generate_response(prompt, sampling, use_debug)
+
+        # Show prompt details for modes 2-4 BEFORE the response
+        if mode in ["2", "3", "4"]:
+            show_prompt_details(prompt, system_prompt_used, user_input)
 
         # Keep a blank line between user and agent, and print the reply on the same line as the header.
         response = continuation.lstrip("\n")
