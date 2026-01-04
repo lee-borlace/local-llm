@@ -59,14 +59,19 @@ def trim_at_stop(text: str) -> str:
 
 class DebugTokenStreamer(BaseStreamer):
     """
-    Streams token-level debug lines showing the full input sequence
-    (comma-separated tokens) followed by the next sampled token.
+    Streams token-level debug for the first 10 generated tokens, showing:
+    - Context tokens (cyan)
+    - Current input token (yellow)
+    - Predicted output token (green)
     """
 
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, max_debug_tokens=10):
         self.tokenizer = tokenizer
         self._seen_prompt = False
-        self._tokens_line = ""
+        self._prompt_tokens = []
+        self._generated_tokens = []
+        self._max_debug_tokens = max_debug_tokens
+        self._generation_count = 0
 
     def _format_token(self, token_id: int) -> str:
         # Decode a single token id to readable text, escaping newlines/tabs.
@@ -89,24 +94,52 @@ class DebugTokenStreamer(BaseStreamer):
     def put(self, value):
         token_ids = self._flatten(value)
 
-        # First call contains the prompt; store it so we can show the full input on later steps.
+        # First call contains the prompt; store it
         if not self._seen_prompt:
-            formatted_prompt = [self._format_token(tok) for tok in token_ids]
-            self._tokens_line = ", ".join(formatted_prompt)
+            self._prompt_tokens = token_ids
             self._seen_prompt = True
             return
 
+        # Process generated tokens
         for token_id in token_ids:
+            self._generation_count += 1
             formatted = self._format_token(token_id)
-            print(f"{self._tokens_line} => {formatted}\n", flush=True)
-            self._tokens_line = f"{self._tokens_line}, {formatted}" if self._tokens_line else formatted
+            self._generated_tokens.append(token_id)
+            
+            # Only show detailed token-by-token for first 10 tokens
+            if self._generation_count <= self._max_debug_tokens:
+                # Build the current sequence
+                current_sequence = self._prompt_tokens + self._generated_tokens[:-1]
+                
+                # Color codes: cyan for context, yellow for last input token, green for prediction
+                if len(current_sequence) > 0:
+                    context_tokens = current_sequence[:-1]
+                    last_token = current_sequence[-1]
+                    
+                    context_str = "\033[36m" + " ".join(self._format_token(t) for t in context_tokens) + "\033[0m"
+                    last_token_str = "\033[33m" + self._format_token(last_token) + "\033[0m"
+                    
+                    if context_tokens:
+                        print(f"{context_str} {last_token_str} => \033[32m{formatted}\033[0m", flush=True)
+                    else:
+                        print(f"{last_token_str} => \033[32m{formatted}\033[0m", flush=True)
+                else:
+                    # Edge case: first token generated
+                    print(f"\033[32m{formatted}\033[0m", flush=True)
 
     def end(self):
-        # Add a blank line after each generation's trace for readability.
-        if self._seen_prompt:
-            print("", flush=True)
+        # Show completion message after token-by-token display
+        if self._seen_prompt and self._generation_count > 0:
+            if self._generation_count > self._max_debug_tokens:
+                print(f"\n\033[90m... (showing first {self._max_debug_tokens} of {self._generation_count} tokens)\033[0m\n", flush=True)
+            else:
+                print("", flush=True)
+        
+        # Reset state
         self._seen_prompt = False
-        self._tokens_line = ""
+        self._prompt_tokens = []
+        self._generated_tokens = []
+        self._generation_count = 0
 
 
 class StopOnSequences(StoppingCriteria):
@@ -149,18 +182,7 @@ print("Starting Falcon interactive loop...", flush=True)
 # -------------------------
 # Menu
 # -------------------------
-def ask_debug_mode():
-    while True:
-        choice = input("Enable token-by-token debug output? (y/n): ").strip().lower()
-        if choice in {"y", "yes"}:
-            return True
-        if choice in {"n", "no"}:
-            return False
-        print("Please enter 'y' or 'n'.\n")
-
-
-def show_menu(debug_mode: bool):
-    print(f"Debug token trace is {'ON' if debug_mode else 'OFF'}")
+def show_menu():
     print("Select mode:")
     print("1 - Raw model (no system prompt)")
     print("2 - System prompt (single-turn, stateless)")
@@ -168,26 +190,25 @@ def show_menu(debug_mode: bool):
     print("4 - System prompt with content restriction (no poodles)")
     print("Type 'menu' at any time to return here.\n")
 
-def get_mode(debug_mode: bool):
+def get_mode():
     while True:
-        show_menu(debug_mode)
+        show_menu()
         choice = input("Enter 1, 2, 3, or 4: ").strip()
         if choice in {"1", "2", "3", "4"}:
             return choice
         print("Invalid choice.\n")
 
 
-def generate_response(prompt: str, sampling: dict, debug_mode: bool):
+def generate_response(prompt: str, sampling: dict, use_debug: bool):
     """Generate a response from the model with optional debug streaming."""
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[1]
 
-    streamer = DebugTokenStreamer(tokenizer) if debug_mode else None
+    streamer = DebugTokenStreamer(tokenizer, max_debug_tokens=10) if use_debug else None
     stopping = StoppingCriteriaList([StopOnSequences(tokenizer, input_len, STOP_SEQUENCES)])
     
-    if debug_mode:
-        print("\n", flush=True)
-        print("Token trace (prompt tokens included):", flush=True)
+    if use_debug:
+        print("\n\033[1mToken-by-token generation (first 10 tokens):\033[0m", flush=True)
 
     with torch.no_grad():
         output = model.generate(
@@ -211,8 +232,7 @@ def generate_response(prompt: str, sampling: dict, debug_mode: bool):
 # -------------------------
 # Main loop
 # -------------------------
-debug_mode = ask_debug_mode()
-mode = get_mode(debug_mode)
+mode = get_mode()
 conversation_history = []  # stores (user, assistant) pairs
 
 while True:
@@ -221,13 +241,15 @@ while True:
 
         if user_input.lower() == "menu":
             conversation_history.clear()
-            debug_mode = ask_debug_mode()
-            mode = get_mode(debug_mode)
+            mode = get_mode()
             continue
 
         # -------------------------
         # Build prompt
         # -------------------------
+        # Debug mode is automatically enabled only for mode 1 (raw model)
+        use_debug = (mode == "1")
+        
         if mode == "1":
             prompt = user_input
             sampling = RAW_SAMPLING
@@ -263,7 +285,7 @@ while True:
         # -------------------------
         # Run model
         # -------------------------
-        continuation = generate_response(prompt, sampling, debug_mode)
+        continuation = generate_response(prompt, sampling, use_debug)
 
         # Keep a blank line between user and agent, and print the reply on the same line as the header.
         response = continuation.lstrip("\n")
