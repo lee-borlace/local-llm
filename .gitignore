@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+llm-env/
+falcon-env/
+mistral-env/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model files and checkpoints (too large for git)
+*.bin
+*.safetensors
+*.gguf
+*.pth
+checkpoint-*/
+
+# Logs and temp files
+*.log
+logs/
+*.tmp
+
+# API keys and secrets
+.env
+secrets.json
