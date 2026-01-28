@@ -1,0 +1,47 @@
+# Unified Requirements for Falcon & Mistral Models + API Server
+# Compatible with Python 3.10 or 3.11
+
+# ============================================================================
+# PyTorch with CUDA Support
+# ============================================================================
+# IMPORTANT: Install PyTorch with CUDA first using:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Then install the rest: pip install -r requirements.txt
+torch>=2.5.0,<3.0.0
+
+# ============================================================================
+# Core Transformers & ML Libraries
+# ============================================================================
+transformers>=4.57.0  # Latest with Mistral & Falcon support
+accelerate>=1.2.0     # Multi-GPU & distributed training support
+datasets>=3.0.0       # For loading training data
+
+# ============================================================================
+# Fine-tuning & Quantization (for Mistral training & both models' inference)
+# ============================================================================
+peft>=0.13.0          # Parameter-Efficient Fine-Tuning (LoRA/QLoRA)
+trl>=0.26.0           # Transformer Reinforcement Learning (SFTTrainer)
+bitsandbytes>=0.44.0  # 4-bit quantization support
+
+# ============================================================================
+# API Server (Flask)
+# ============================================================================
+flask>=2.3.0
+flask-cors>=4.0.0
+
+# ============================================================================
+# Supporting Libraries
+# ============================================================================
+sentencepiece>=0.2.0  # Tokenizer support
+protobuf>=3.20.0      # For tokenizers
+scipy>=1.10.0         # Scientific computing
+safetensors>=0.4.0    # Safe tensor serialization
+huggingface-hub>=0.20.0  # Model hub access
+
+# ============================================================================
+# Utilities
+# ============================================================================
+numpy>=1.24.0
+tqdm>=4.65.0
+requests>=2.31.0
+pyyaml>=6.0
