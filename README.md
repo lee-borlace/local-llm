@@ -25,7 +25,7 @@ pip install -r requirements.txt
 python api_server.py
 
 # Run interactive client
-python test_api.py
+python agent_client.py
 ```
 
 ## How It Works
@@ -114,7 +114,7 @@ Check what model is loaded.
 local-llm/
 ├── llm-env/                    # Unified virtual environment
 ├── api_server.py               # Main API server (on-demand loading)
-├── test_api.py                 # Interactive client
+├── agent_client.py                 # Interactive client
 ├── requirements.txt            # All dependencies
 ├── setup_env.ps1              # Automated setup
 └── README.md                   # This file

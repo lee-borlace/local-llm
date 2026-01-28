@@ -56,13 +56,13 @@ The server will:
 From the same machine:
 ```powershell
 # Interactive test client
-python test_api.py
+python agent_client.py
 
 # Detailed tests with token history
 python test_api_detailed.py
 
 # Quick automated tests
-python test_api.py test
+python agent_client.py test
 ```
 
 From your demo machine:
