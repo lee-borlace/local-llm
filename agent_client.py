@@ -9,7 +9,7 @@ import json
 
 
 BASE_URL = "http://localhost:5000"
-DEBUG_MODE = False  # Will be set during startup
+DEBUG_MODE = True  # Always enabled
 
 
 def check_status():
@@ -104,9 +104,9 @@ def display_token_by_token(token_history, max_tokens=10):
 def display_prompt_formatted(prompt, current_user_input):
     """Display the complete prompt with color-coded sections.
     
-    System prompt and history in gray, current user input in orange.
+    System prompt and history in gray, current user input in yellow.
     """
-    print("\n\033[90m-----------------------------------\033[0m")
+    print("\n\033[90m-- SENT TO MODEL ------------------------\033[0m")
     
     # Find where the current user input appears
     last_user_marker = prompt.rfind("User:\n")
@@ -123,7 +123,7 @@ def display_prompt_formatted(prompt, current_user_input):
             current_input = after_marker[:assistant_marker]
             trailing = after_marker[assistant_marker:]
             
-            # Gray for system/history, orange for current input, gray for markers
+            # Gray for system/history, yellow for current input, gray for markers
             print("\033[90m" + before_current + "\033[0m", end="")
             print("\033[33m" + current_input + "\033[0m", end="")
             print("\033[90m" + trailing + "\033[0m", end="")
@@ -134,7 +134,17 @@ def display_prompt_formatted(prompt, current_user_input):
         # Fallback
         print("\033[90m" + prompt + "\033[0m", end="")
     
-    print("\n\033[90m-----------------------------------\033[0m\n")
+    print()  # Just a newline, no closing dashes
+
+
+def display_response_formatted(response):
+    """Display the agent response with formatting.
+    
+    Shows the response in white on a gray-bordered section.
+    """
+    print("\n\033[90m-- RECEIVED FROM MODEL ------------------\033[0m")
+    print("\033[97m" + response + "\033[0m")  # Bright white for response
+    print("\033[90m-----------------------------------------\033[0m")
 
 
 def show_main_menu():
@@ -152,8 +162,7 @@ def show_main_menu():
     print("\nSelect a model:")
     print("1. Falcon-7B")
     print("2. Mistral-7B")
-    print("3. Back (reconfigure debug mode)")
-    print("4. Exit")
+    print("3. Exit")
     print("=" * 60)
 
 
@@ -190,7 +199,6 @@ def falcon_session():
         print(f"Falcon Mode {mode} Session")
         print("Type 'back' to return to mode selection")
         print("Type 'switch' to change Falcon mode")
-        print("Type 'debug' to toggle debug mode")
         print("-" * 60)
         
         while True:  # Chat loop
@@ -206,12 +214,6 @@ def falcon_session():
                 # Break to mode selection
                 break
             
-            if user_input.lower() == 'debug':
-                DEBUG_MODE = not DEBUG_MODE
-                status = "enabled" if DEBUG_MODE else "disabled"
-                print(f"→ Debug mode {status}")
-                continue
-            
             # Prepare request
             params = {"mode": mode}
             if mode == '3':
@@ -225,14 +227,13 @@ def falcon_session():
                 if mode == '1' and DEBUG_MODE:
                     display_token_by_token(result.get('token_history', []))
                 
-                # Show formatted prompt for modes 2-4 BEFORE the response
+                # Show formatted prompt for modes 2-4
                 if mode in ['2', '3', '4']:
                     display_prompt_formatted(result['full_prompt'], user_input)
                 
-                # Display response
+                # Display formatted response for all modes
                 response = result['response'].lstrip("\n")
-                print("")  # blank line
-                print(f"AGENT : {response}")
+                display_response_formatted(response)
                 
                 # Update context for mode 3
                 if mode == '3':
@@ -255,7 +256,6 @@ def mistral_session():
     print("Type 'back' to return to model selection")
     print("Type 'greedy' for deterministic mode")
     print("Type 'sample' for sampling mode (temp=0.7)")
-    print("Type 'debug' to toggle debug mode")
     print("-" * 60)
     
     temperature = None  # Greedy by default
@@ -279,12 +279,6 @@ def mistral_session():
             print("→ Switched to sampling mode (temp=0.7)")
             continue
         
-        if user_input.lower() == 'debug':
-            DEBUG_MODE = not DEBUG_MODE
-            status = "enabled" if DEBUG_MODE else "disabled"
-            print(f"→ Debug mode {status}")
-            continue
-        
         # Send request
         params = {}
         if temperature is not None:
@@ -295,12 +289,11 @@ def mistral_session():
         if result:
             # Show debug prompt if enabled
             if DEBUG_MODE:
-                print(f"\n[DEBUG] Exact prompt sent to model:")
-                print(f"{repr(result['full_prompt'])}")
+                print(f"\n\033[90m-- SENT TO MODEL ------------------------\033[0m")
+                print(f"\033[90m{repr(result['full_prompt'])}\033[0m")
             
-            # Display response
-            print("\nAssistant: ", end="", flush=True)
-            print(result['response'])
+            # Display formatted response
+            display_response_formatted(result['response'])
 
 
 def main():
@@ -319,47 +312,19 @@ def main():
     
     print("✅ Connected to server")
     
-    # Ask about debug mode
-    print("\n" + "=" * 60)
-    print("CONFIGURATION")
-    print("=" * 60)
-    print("\n🔍 Enable debug mode?")
-    print("   Shows complete prompts and token details")
-    debug_choice = input("   Enable? (y/n) [default: n]: ").strip().lower()
-    DEBUG_MODE = debug_choice in ['y', 'yes']
-    
-    if DEBUG_MODE:
-        print("✅ Debug mode enabled")
-    else:
-        print("ℹ️  Debug mode disabled")
-    
     while True:
         show_main_menu()
-        choice = input("\nYour choice (1-4): ").strip()
+        choice = input("\nYour choice (1-3): ").strip()
         
         if choice == '1':
             falcon_session()
         elif choice == '2':
             mistral_session()
         elif choice == '3':
-            # Back to debug configuration
-            print("\n" + "=" * 60)
-            print("DEBUG CONFIGURATION")
-            print("=" * 60)
-            print("\n🔍 Enable debug mode?")
-            print("   Shows complete prompts and token details")
-            debug_choice = input("   Enable? (y/n) [default: n]: ").strip().lower()
-            DEBUG_MODE = debug_choice in ['y', 'yes']
-            
-            if DEBUG_MODE:
-                print("✅ Debug mode enabled")
-            else:
-                print("ℹ️  Debug mode disabled")
-        elif choice == '4':
             print("\nGoodbye!")
             break
         else:
-            print("Invalid choice. Please select 1, 2, 3, or 4.")
+            print("Invalid choice. Please select 1, 2, or 3.")
 
 
 if __name__ == "__main__":
