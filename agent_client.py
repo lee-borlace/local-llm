@@ -9,6 +9,7 @@ import json
 
 
 BASE_URL = "http://localhost:5000"
+DEBUG_MODE = False  # Will be set during startup
 
 
 def check_status():
@@ -56,6 +57,82 @@ def chat(message, **kwargs):
         return None
 
 
+def display_token_by_token(token_history, max_tokens=10):
+    """Display token-by-token generation with color coding.
+    
+    Shows first max_tokens with:
+    - Cyan for context tokens
+    - Yellow for last input token
+    - Green for predicted token
+    """
+    if not token_history:
+        return
+    
+    print("\n\033[1mToken-by-token generation (first 10 tokens):\033[0m", flush=True)
+    
+    displayed = 0
+    for context_tokens, new_token in token_history:
+        if displayed >= max_tokens:
+            break
+        
+        # Format tokens
+        if len(context_tokens) > 0:
+            context_str = " ".join(context_tokens[:-1]) if len(context_tokens) > 1 else ""
+            last_token = context_tokens[-1] if context_tokens else ""
+            
+            # Color codes: cyan for context, yellow for last input, green for prediction
+            if context_str:
+                print(f"\033[36m{context_str}\033[0m ", end="")
+            if last_token:
+                print(f"\033[33m{last_token}\033[0m => ", end="")
+            print(f"\033[32m{new_token}\033[0m", flush=True)
+        else:
+            print(f"\033[32m{new_token}\033[0m", flush=True)
+        
+        displayed += 1
+    
+    if len(token_history) > max_tokens:
+        print(f"\n\033[90m... (showing first {max_tokens} of {len(token_history)} tokens)\033[0m\n", flush=True)
+    else:
+        print("", flush=True)
+
+
+def display_prompt_formatted(prompt, current_user_input):
+    """Display the complete prompt with color-coded sections.
+    
+    System prompt and history in gray, current user input in orange.
+    """
+    print("\n\033[90m-----------------------------------\033[0m")
+    
+    # Find where the current user input appears
+    last_user_marker = prompt.rfind("User:\n")
+    
+    if last_user_marker != -1:
+        # Everything before current user input
+        before_current = prompt[:last_user_marker + 6]  # 6 = len("User:\n")
+        after_marker = prompt[last_user_marker + 6:]
+        
+        # Find where current input ends
+        assistant_marker = after_marker.find("\n\nAssistant:\n")
+        
+        if assistant_marker != -1:
+            current_input = after_marker[:assistant_marker]
+            trailing = after_marker[assistant_marker:]
+            
+            # Gray for system/history, orange for current input, gray for markers
+            print("\033[90m" + before_current + "\033[0m", end="")
+            print("\033[33m" + current_input + "\033[0m", end="")
+            print("\033[90m" + trailing + "\033[0m", end="")
+        else:
+            print("\033[90m" + before_current + "\033[0m", end="")
+            print("\033[33m" + after_marker + "\033[0m", end="")
+    else:
+        # Fallback
+        print("\033[90m" + prompt + "\033[0m", end="")
+    
+    print("\n\033[90m-----------------------------------\033[0m\n")
+
+
 def show_main_menu():
     """Display main model selection menu."""
     print("\n" + "=" * 60)
@@ -88,6 +165,7 @@ def falcon_mode_menu():
 
 def falcon_session():
     """Interactive session with Falcon."""
+    global DEBUG_MODE
     mode = falcon_mode_menu()
     
     if not load_model("falcon", {"mode": mode}):
@@ -99,6 +177,7 @@ def falcon_session():
     print(f"Falcon Mode {mode} Session")
     print("Type 'back' to return to main menu")
     print("Type 'switch' to change Falcon mode")
+    print("Type 'debug' to toggle debug mode")
     print("-" * 60)
     
     while True:
@@ -114,6 +193,12 @@ def falcon_session():
             mode = falcon_mode_menu()
             continue
         
+        if user_input.lower() == 'debug':
+            DEBUG_MODE = not DEBUG_MODE
+            status = "enabled" if DEBUG_MODE else "disabled"
+            print(f"→ Debug mode {status}")
+            continue
+        
         # Prepare request
         params = {"mode": mode}
         if mode == '3':
@@ -123,9 +208,18 @@ def falcon_session():
         result = chat(user_input, **params)
         
         if result:
-            print(f"\nFalcon: {result['response']}")
-            print(f"\n[Prompt length: {len(result['full_prompt'])} chars, "
-                  f"Tokens generated: {len(result['token_history'])}]")
+            # Show token-by-token for mode 1 (raw model) when debug enabled
+            if mode == '1' and DEBUG_MODE:
+                display_token_by_token(result.get('token_history', []))
+            
+            # Show formatted prompt for modes 2-4 BEFORE the response
+            if mode in ['2', '3', '4']:
+                display_prompt_formatted(result['full_prompt'], user_input)
+            
+            # Display response
+            response = result['response'].lstrip("\n")
+            print("")  # blank line
+            print(f"AGENT : {response}")
             
             # Update context for mode 3
             if mode == '3':
@@ -139,6 +233,7 @@ def falcon_session():
 
 def mistral_session():
     """Interactive session with Mistral."""
+    global DEBUG_MODE
     if not load_model("mistral"):
         return
     
@@ -147,6 +242,7 @@ def mistral_session():
     print("Type 'back' to return to main menu")
     print("Type 'greedy' for deterministic mode")
     print("Type 'sample' for sampling mode (temp=0.7)")
+    print("Type 'debug' to toggle debug mode")
     print("-" * 60)
     
     temperature = None  # Greedy by default
@@ -170,6 +266,12 @@ def mistral_session():
             print("→ Switched to sampling mode (temp=0.7)")
             continue
         
+        if user_input.lower() == 'debug':
+            DEBUG_MODE = not DEBUG_MODE
+            status = "enabled" if DEBUG_MODE else "disabled"
+            print(f"→ Debug mode {status}")
+            continue
+        
         # Send request
         params = {}
         if temperature is not None:
@@ -178,14 +280,20 @@ def mistral_session():
         result = chat(user_input, **params)
         
         if result:
-            print(f"\nMistral: {result['response']}")
-            print(f"\n[Prompt: {result['full_prompt'][:50]}..., "
-                  f"Tokens: {len(result['token_history'])}, "
-                  f"Mode: {result['mode']}]")
+            # Show debug prompt if enabled
+            if DEBUG_MODE:
+                print(f"\n[DEBUG] Exact prompt sent to model:")
+                print(f"{repr(result['full_prompt'])}")
+            
+            # Display response
+            print("\nAssistant: ", end="", flush=True)
+            print(result['response'])
 
 
 def main():
     """Main client loop."""
+    global DEBUG_MODE
+    
     print("\nConnecting to server...")
     
     # Check server
@@ -197,6 +305,20 @@ def main():
         return
     
     print("✅ Connected to server")
+    
+    # Ask about debug mode
+    print("\n" + "=" * 60)
+    print("CONFIGURATION")
+    print("=" * 60)
+    print("\n🔍 Enable debug mode?")
+    print("   Shows complete prompts and token details")
+    debug_choice = input("   Enable? (y/n) [default: n]: ").strip().lower()
+    DEBUG_MODE = debug_choice in ['y', 'yes']
+    
+    if DEBUG_MODE:
+        print("✅ Debug mode enabled")
+    else:
+        print("ℹ️  Debug mode disabled")
     
     while True:
         show_main_menu()
