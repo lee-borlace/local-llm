@@ -75,19 +75,23 @@ def display_token_by_token(token_history, max_tokens=10):
         if displayed >= max_tokens:
             break
         
+        # Escape newlines and tabs in tokens for display
+        def escape_token(token):
+            return token.replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+        
         # Format tokens
         if len(context_tokens) > 0:
-            context_str = " ".join(context_tokens[:-1]) if len(context_tokens) > 1 else ""
-            last_token = context_tokens[-1] if context_tokens else ""
+            context_str = " ".join(escape_token(t) for t in context_tokens[:-1]) if len(context_tokens) > 1 else ""
+            last_token = escape_token(context_tokens[-1]) if context_tokens else ""
             
             # Color codes: cyan for context, yellow for last input, green for prediction
             if context_str:
                 print(f"\033[36m{context_str}\033[0m ", end="")
             if last_token:
                 print(f"\033[33m{last_token}\033[0m => ", end="")
-            print(f"\033[32m{new_token}\033[0m", flush=True)
+            print(f"\033[32m{escape_token(new_token)}\033[0m", flush=True)
         else:
-            print(f"\033[32m{new_token}\033[0m", flush=True)
+            print(f"\033[32m{escape_token(new_token)}\033[0m", flush=True)
         
         displayed += 1
     
@@ -148,7 +152,8 @@ def show_main_menu():
     print("\nSelect a model:")
     print("1. Falcon-7B")
     print("2. Mistral-7B")
-    print("3. Exit")
+    print("3. Back (reconfigure debug mode)")
+    print("4. Exit")
     print("=" * 60)
 
 
@@ -159,76 +164,84 @@ def falcon_mode_menu():
     print("2. Single-turn Q&A (default)")
     print("3. Stateful conversation")
     print("4. Content restriction (no poodles)")
-    choice = input("Select mode (1-4, default=2): ").strip()
-    return choice if choice in ['1', '2', '3', '4'] else '2'
+    print("5. Back (return to model selection)")
+    choice = input("Select mode (1-5, default=2): ").strip()
+    return choice if choice in ['1', '2', '3', '4', '5'] else '2'
 
 
 def falcon_session():
     """Interactive session with Falcon."""
     global DEBUG_MODE
-    mode = falcon_mode_menu()
     
-    if not load_model("falcon", {"mode": mode}):
+    # Load model once at the start
+    if not load_model("falcon"):
         return
     
-    context = []  # For mode 3
-    
-    print("\n" + "-" * 60)
-    print(f"Falcon Mode {mode} Session")
-    print("Type 'back' to return to main menu")
-    print("Type 'switch' to change Falcon mode")
-    print("Type 'debug' to toggle debug mode")
-    print("-" * 60)
-    
-    while True:
-        user_input = input("\nYou: ").strip()
+    while True:  # Mode selection loop
+        mode = falcon_mode_menu()
         
-        if not user_input:
-            continue
+        # Handle back from mode menu
+        if mode == '5':
+            return
         
-        if user_input.lower() == 'back':
-            break
+        context = []  # For mode 3
         
-        if user_input.lower() == 'switch':
-            mode = falcon_mode_menu()
-            continue
+        print("\n" + "-" * 60)
+        print(f"Falcon Mode {mode} Session")
+        print("Type 'back' to return to mode selection")
+        print("Type 'switch' to change Falcon mode")
+        print("Type 'debug' to toggle debug mode")
+        print("-" * 60)
         
-        if user_input.lower() == 'debug':
-            DEBUG_MODE = not DEBUG_MODE
-            status = "enabled" if DEBUG_MODE else "disabled"
-            print(f"→ Debug mode {status}")
-            continue
-        
-        # Prepare request
-        params = {"mode": mode}
-        if mode == '3':
-            params["context"] = context
-        
-        # Send request
-        result = chat(user_input, **params)
-        
-        if result:
-            # Show token-by-token for mode 1 (raw model) when debug enabled
-            if mode == '1' and DEBUG_MODE:
-                display_token_by_token(result.get('token_history', []))
+        while True:  # Chat loop
+            user_input = input("\nYou: ").strip()
             
-            # Show formatted prompt for modes 2-4 BEFORE the response
-            if mode in ['2', '3', '4']:
-                display_prompt_formatted(result['full_prompt'], user_input)
+            if not user_input:
+                continue
             
-            # Display response
-            response = result['response'].lstrip("\n")
-            print("")  # blank line
-            print(f"AGENT : {response}")
+            if user_input.lower() == 'back':
+                break  # Break to mode selection
             
-            # Update context for mode 3
+            if user_input.lower() == 'switch':
+                # Break to mode selection
+                break
+            
+            if user_input.lower() == 'debug':
+                DEBUG_MODE = not DEBUG_MODE
+                status = "enabled" if DEBUG_MODE else "disabled"
+                print(f"→ Debug mode {status}")
+                continue
+            
+            # Prepare request
+            params = {"mode": mode}
             if mode == '3':
-                context.append({
-                    "user": user_input,
-                    "assistant": result['response']
-                })
-                if len(context) > 4:
-                    context = context[-4:]
+                params["context"] = context
+            
+            # Send request
+            result = chat(user_input, **params)
+            
+            if result:
+                # Show token-by-token for mode 1 (raw model) when debug enabled
+                if mode == '1' and DEBUG_MODE:
+                    display_token_by_token(result.get('token_history', []))
+                
+                # Show formatted prompt for modes 2-4 BEFORE the response
+                if mode in ['2', '3', '4']:
+                    display_prompt_formatted(result['full_prompt'], user_input)
+                
+                # Display response
+                response = result['response'].lstrip("\n")
+                print("")  # blank line
+                print(f"AGENT : {response}")
+                
+                # Update context for mode 3
+                if mode == '3':
+                    context.append({
+                        "user": user_input,
+                        "assistant": result['response']
+                    })
+                    if len(context) > 4:
+                        context = context[-4:]
 
 
 def mistral_session():
@@ -239,7 +252,7 @@ def mistral_session():
     
     print("\n" + "-" * 60)
     print("Mistral Session")
-    print("Type 'back' to return to main menu")
+    print("Type 'back' to return to model selection")
     print("Type 'greedy' for deterministic mode")
     print("Type 'sample' for sampling mode (temp=0.7)")
     print("Type 'debug' to toggle debug mode")
@@ -322,17 +335,31 @@ def main():
     
     while True:
         show_main_menu()
-        choice = input("\nYour choice (1-3): ").strip()
+        choice = input("\nYour choice (1-4): ").strip()
         
         if choice == '1':
             falcon_session()
         elif choice == '2':
             mistral_session()
         elif choice == '3':
+            # Back to debug configuration
+            print("\n" + "=" * 60)
+            print("DEBUG CONFIGURATION")
+            print("=" * 60)
+            print("\n🔍 Enable debug mode?")
+            print("   Shows complete prompts and token details")
+            debug_choice = input("   Enable? (y/n) [default: n]: ").strip().lower()
+            DEBUG_MODE = debug_choice in ['y', 'yes']
+            
+            if DEBUG_MODE:
+                print("✅ Debug mode enabled")
+            else:
+                print("ℹ️  Debug mode disabled")
+        elif choice == '4':
             print("\nGoodbye!")
             break
         else:
-            print("Invalid choice. Please select 1, 2, or 3.")
+            print("Invalid choice. Please select 1, 2, 3, or 4.")
 
 
 if __name__ == "__main__":
