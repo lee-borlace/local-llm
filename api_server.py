@@ -5,14 +5,27 @@ Models are loaded on-demand based on client requests.
 Allows switching between models dynamically.
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import gc
+import sys
 import torch
+import json
 from transformers.generation.streamers import BaseStreamer
 
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS to avoid DNS lookups which can cause network delays
+CORS(app, 
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=False,
+     send_wildcard=True,
+     expose_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization"])
+
+# Disable hostname resolution to prevent DNS lookup delays
+app.config['SERVER_NAME'] = None
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
 
 # Global state
 current_model_name = None
@@ -100,7 +113,8 @@ def load_falcon():
         device_map="auto",
     )
     current_model_name = "falcon"
-    print("✅ Falcon-7B loaded")
+    device_info = f"Device: {next(model.parameters()).device}" if hasattr(model, 'parameters') else "Device: Unknown"
+    print(f"✅ Falcon-7B loaded - {device_info}")
 
 
 def load_mistral():
@@ -139,7 +153,8 @@ def load_mistral():
             device_map=device_map,
             torch_dtype=torch_dtype,
         )
-        print("✅ Mistral-7B base model loaded")
+        device_info = f"Device: {next(model.parameters()).device}" if hasattr(model, 'parameters') else "Device: Unknown"
+        print(f"✅ Mistral-7B base model loaded - {device_info}")
     else:
         from peft import PeftModel
         tokenizer = AutoTokenizer.from_pretrained(output_dir)
@@ -150,7 +165,8 @@ def load_mistral():
             torch_dtype=torch_dtype,
         )
         model = PeftModel.from_pretrained(base_model, output_dir)
-        print("✅ Mistral-7B fine-tuned model loaded")
+        device_info = f"Device: {next(model.parameters()).device}" if hasattr(model, 'parameters') else "Device: Unknown"
+        print(f"✅ Mistral-7B fine-tuned model loaded - {device_info}")
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -182,6 +198,10 @@ def falcon_generate(prompt, temperature=0.7, top_p=0.9, max_tokens=200):
     stopping = StoppingCriteriaList([StopOnSequences(tokenizer, input_len, STOP_SEQUENCES)])
     streamer = TokenCaptureStreamer(tokenizer)
     
+    import time
+    print(f"[Falcon] Starting generation (max_tokens={max_tokens})...")
+    start_time = time.time()
+    
     with torch.no_grad():
         output = model.generate(
             **inputs,
@@ -194,15 +214,24 @@ def falcon_generate(prompt, temperature=0.7, top_p=0.9, max_tokens=200):
             streamer=streamer,
         )
     
+    elapsed = time.time() - start_time
+    print(f"[Falcon] Generation completed in {elapsed:.2f} seconds")
+    sys.stdout.flush()
+    
     continuation_ids = output[0][input_len:]
     continuation = tokenizer.decode(continuation_ids, skip_special_tokens=True)
     
-    for stop in STOP_SEQUENCES:
-        idx = continuation.find(stop)
-        if idx != -1:
-            continuation = continuation[:idx].strip()
+    # Keep the raw continuation
+    raw_continuation = continuation
     
-    return continuation.strip(), streamer.get_token_strings()
+    # Trim at stop sequences for the clean response
+    trimmed_continuation = continuation
+    for stop in STOP_SEQUENCES:
+        idx = trimmed_continuation.find(stop)
+        if idx != -1:
+            trimmed_continuation = trimmed_continuation[:idx].strip()
+    
+    return trimmed_continuation.strip(), raw_continuation, streamer.get_token_strings()
 
 
 def mistral_generate(user_message, max_tokens=512, temperature=None):
@@ -216,6 +245,10 @@ def mistral_generate(user_message, max_tokens=512, temperature=None):
         inputs = inputs.to("cuda")
     
     streamer = TokenCaptureStreamer(tokenizer)
+    
+    import time
+    print(f"[Mistral] Starting generation (max_tokens={max_tokens})...")
+    start_time = time.time()
     
     with torch.no_grad():
         if temperature is None or temperature == 0:
@@ -241,15 +274,24 @@ def mistral_generate(user_message, max_tokens=512, temperature=None):
                 streamer=streamer,
             )
     
+    elapsed = time.time() - start_time
+    print(f"[Mistral] Generation completed in {elapsed:.2f} seconds")
+    sys.stdout.flush()
+    
     response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
     
+    # Keep the raw response
+    raw_response = response
+    
+    # Trim at stop markers for the clean response
+    trimmed_response = response
     stop_markers = ['\nYou:', '\n[INST]', '\nUser:', '\nHuman:']
     for marker in stop_markers:
-        if marker in response:
-            response = response.split(marker)[0]
+        if marker in trimmed_response:
+            trimmed_response = trimmed_response.split(marker)[0]
             break
     
-    return response.strip(), prompt, streamer.get_token_strings()
+    return trimmed_response.strip(), raw_response, prompt, streamer.get_token_strings()
 
 
 # -------------------------
@@ -316,6 +358,9 @@ def load_model_endpoint():
 def chat():
     global falcon_mode
     
+    import time
+    request_start = time.time()
+    
     try:
         if model is None:
             return jsonify({"error": "No model loaded. Use /load_model first"}), 400
@@ -375,29 +420,53 @@ def chat():
                 temp = temperature if temperature is not None else 0.7
                 top_p = 0.9
             
-            response, token_history = falcon_generate(prompt, temperature=temp, top_p=top_p, max_tokens=max_tokens)
+            response, raw_response, token_history = falcon_generate(prompt, temperature=temp, top_p=top_p, max_tokens=max_tokens)
             
-            return jsonify({
+            total_time = time.time() - request_start
+            print(f"[REQUEST] Total request time: {total_time:.2f} seconds")
+            sys.stdout.flush()
+            
+            json_start = time.time()
+            # Only include token_history in raw mode (mode 1) to reduce payload size
+            response_data = {
                 "response": response,
+                "raw_response": raw_response,
                 "full_prompt": prompt,
-                "token_history": token_history,
                 "model": "falcon",
                 "mode": mode
-            })
+            }
+            if mode == '1':
+                response_data["token_history"] = token_history
+            
+            result = jsonify(response_data)
+            json_time = time.time() - json_start
+            print(f"[SERIALIZATION] JSON serialization took {json_time:.2f} seconds")
+            sys.stdout.flush()
+            return result
             
         else:  # Mistral branch
             temperature = data.get('temperature')
             max_tokens = data.get('max_tokens', 512)
             
-            response, full_prompt, token_history = mistral_generate(message, max_tokens=max_tokens, temperature=temperature)
+            response, raw_response, full_prompt, token_history = mistral_generate(message, max_tokens=max_tokens, temperature=temperature)
             
-            return jsonify({
+            total_time = time.time() - request_start
+            print(f"[REQUEST] Total request time: {total_time:.2f} seconds")
+            sys.stdout.flush()
+            
+            json_start = time.time()
+            # Exclude token_history from Mistral responses to reduce payload size
+            result = jsonify({
                 "response": response,
+                "raw_response": raw_response,
                 "full_prompt": full_prompt,
-                "token_history": token_history,
                 "model": "mistral",
                 "mode": "greedy" if temperature is None or temperature == 0 else f"sampling(temp={temperature})"
             })
+            json_time = time.time() - json_start
+            print(f"[SERIALIZATION] JSON serialization took {json_time:.2f} seconds")
+            sys.stdout.flush()
+            return result
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -418,6 +487,8 @@ if __name__ == '__main__':
     print("Models will be loaded on-demand when requested via API")
     print(f"\n🚀 Starting server on {args.host}:{args.port}")
     print(f"📡 Access from remote: http://<your-ip>:{args.port}/")
+    print("⚡ Network optimizations enabled (no DNS lookups)")
     print("=" * 60 + "\n")
     
-    app.run(host=args.host, port=args.port, debug=False)
+    # Run with optimizations: no threading overhead, no reloader, no hostname resolution
+    app.run(host=args.host, port=args.port, debug=False, threaded=True, use_reloader=False)

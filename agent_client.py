@@ -6,16 +6,66 @@ Provides a menu-driven interface to select models and chat.
 
 import requests
 import json
+import time
+import socket
+from requests.adapters import HTTPAdapter
+from urllib3.util.connection import create_connection
 
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://LEE2026:5000"
 DEBUG_MODE = True  # Always enabled
+
+
+# Force IPv4 only to avoid IPv6 timeout issues on Windows
+def create_ipv4_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, socket_options=None):
+    """Force IPv4 connections to avoid IPv6 fallback delays."""
+    host, port = address
+    err = None
+    # Only try IPv4 (AF_INET), not IPv6 (AF_INET6)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+            sock.settimeout(timeout)
+        if source_address:
+            sock.bind(source_address)
+        if socket_options:
+            for opt in socket_options:
+                sock.setsockopt(*opt)
+        sock.connect((host, port))
+        return sock
+    except socket.error as e:
+        err = e
+        if sock is not None:
+            sock.close()
+    if err is not None:
+        raise err
+    else:
+        raise socket.error("getaddrinfo returns an empty list")
+
+
+# Monkey patch urllib3 to use IPv4 only
+import urllib3.util.connection
+urllib3.util.connection.create_connection = create_ipv4_connection
+
+# Create a session for connection pooling and keep-alive
+session = requests.Session()
+# Configure connection pooling and keep-alive
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=1,
+    pool_maxsize=1,
+    max_retries=0,
+    pool_block=False
+)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
+# Set keep-alive headers
+session.headers.update({'Connection': 'keep-alive'})
 
 
 def check_status():
     """Check server status and loaded model."""
     try:
-        response = requests.get(f"{BASE_URL}/status", timeout=10)
+        response = session.get(f"{BASE_URL}/status", timeout=10)
         if response.status_code == 200:
             data = response.json()
             return data.get("loaded_model"), data.get("ready"), True  # True = connected
@@ -31,7 +81,7 @@ def load_model(model_name, options=None):
         payload["options"] = options
     
     print(f"\nLoading {model_name.title()}...")
-    response = requests.post(f"{BASE_URL}/load_model", json=payload)
+    response = session.post(f"{BASE_URL}/load_model", json=payload)
     
     if response.status_code == 200:
         data = response.json()
@@ -47,7 +97,7 @@ def chat(message, **kwargs):
     payload = {"message": message}
     payload.update(kwargs)
     
-    response = requests.post(f"{BASE_URL}/chat", json=payload)
+    response = session.post(f"{BASE_URL}/chat", json=payload, timeout=60)
     
     if response.status_code == 200:
         return response.json()
